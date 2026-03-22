@@ -32,7 +32,7 @@ if prompt := st.chat_input("Type your message here..."):
         try:
             # Use the most stable 2026 model string
             response = client.models.generate_content(
-                model="gemini-2.0-flash",
+                model="gemini-1.5-flash",
                 contents=prompt
             )
             
