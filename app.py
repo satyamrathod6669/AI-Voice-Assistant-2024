@@ -50,10 +50,28 @@ if prompt := st.chat_input("Type your message here..."):
             st.error(f"Technical Error: {e}")
             st.info("Check your 'Manage App > Logs' for more details.")
 
-# 7. Sidebar with Project Info
+# 7. Sidebar with Project Info & Voice Input
 with st.sidebar:
-    st.header("Project Details")
+    st.header("🚀 Project Control")
     st.write("Role: AI Engineer (2024 Batch)")
+    
+    # Clear Chat Button
     if st.button("🗑️ Clear Chat"):
         st.session_state.messages = []
         st.rerun()
+
+    st.write("---")
+    st.subheader("🎙️ Voice Input")
+    
+    # This is the mic recorder component
+    audio = mic_recorder(
+        start_prompt="⏺️ Record Question",
+        stop_prompt="⏹️ Stop & Send",
+        key='my_recorder'
+    )
+
+    # Handle the audio once recording stops
+    if audio:
+        st.audio(audio['bytes'])
+        st.success("Audio captured! Transcribing...")
+        # We will add the transcription logic here next!
