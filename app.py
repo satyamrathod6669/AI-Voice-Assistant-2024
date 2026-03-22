@@ -2,7 +2,7 @@ import streamlit as st
 from google import genai
 from google.genai import types
 
-# --- PAGE CONFIG ---
+# --- 1. PAGE CONFIGURATION ---
 st.set_page_config(page_title="Satyam's AI Assistant", page_icon="🤖", layout="centered")
 
 # Custom CSS for a professional "Messenger" look
@@ -16,17 +16,17 @@ st.markdown("""
 st.title("🤖 Satyam's AI Assistant")
 st.info("Batch 2024 AI Engineering Project")
 
-# --- SECURE API KEY ---
-# When deployed, Streamlit will look for this in its 'Secrets' setting
-try:
+# --- 2. SECURE API KEY & CLIENT SETUP ---
+# This looks for the key in Streamlit's hidden "Secrets" vault
+if "GEMINI_API_KEY" in st.secrets:
     API_KEY = st.secrets["GEMINI_API_KEY"]
-except:
-    # This allows you to still test it locally on your Mac
-    API_KEY = "AIzaSyCMpPyLybdthGF71BoRLJfxMSVWTrE6b3k"
+    # Initialize the Gemini Client here
+    client = genai.Client(api_key=API_KEY)
+else:
+    st.error("Setup required: Please add GEMINI_API_KEY to Streamlit Secrets.")
+    st.stop()
 
-client = genai.Client(api_key=API_KEY)
-
-# --- CHAT HISTORY LOGIC ---
+# --- 3. CHAT HISTORY LOGIC ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -35,7 +35,7 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# --- INPUT HANDLING ---
+# --- 4. INPUT HANDLING ---
 if prompt := st.chat_input("Ask me anything..."):
     # 1. Show User Message
     st.session_state.messages.append({"role": "user", "content": prompt})
@@ -45,13 +45,16 @@ if prompt := st.chat_input("Ask me anything..."):
     # 2. Generate AI Response
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
-            sys_msg = "You are a professional AI assistant built by Satyam, an AI Engineer (2024 batch)."
-            response = client.models.generate_content(
-                model="gemini-2.0-flash-lite", 
-                contents=f"{sys_msg} User: {prompt}"
-            )
-            full_response = response.text
-            st.markdown(full_response)
-            
-    # 3. Save to History
-    st.session_state.messages.append({"role": "assistant", "content": full_response})
+            try:
+                sys_msg = "You are a professional AI assistant built by Satyam, an AI Engineer (2024 batch)."
+                response = client.models.generate_content(
+                    model="gemini-2.0-flash-lite", 
+                    contents=f"{sys_msg} User: {prompt}"
+                )
+                full_response = response.text
+                st.markdown(full_response)
+                
+                # 3. Save to History
+                st.session_state.messages.append({"role": "assistant", "content": full_response})
+            except Exception as e:
+                st.error(f"An error occurred: {e}")
