@@ -1,5 +1,6 @@
 import streamlit as st
 from google import genai
+from streamlit_mic_recorder import mic_recorder
 
 # 1. Page Configuration
 st.set_page_config(page_title="AI Voice Assistant 2024", page_icon="🎙️")
