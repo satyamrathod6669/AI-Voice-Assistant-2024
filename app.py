@@ -47,8 +47,9 @@ if prompt := st.chat_input("Ask me anything..."):
         with st.spinner("Thinking..."):
             try:
                 sys_msg = "You are a professional AI assistant built by Satyam, an AI Engineer (2024 batch)."
+               # Update to the most stable 2.0 model string
                 response = client.models.generate_content(
-                    model="gemini-1.5-flash-002", 
+                    model="gemini-2.0-flash", 
                     contents=f"{sys_msg} User: {prompt}"
                 )
                 full_response = response.text
