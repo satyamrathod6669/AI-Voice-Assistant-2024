@@ -3,6 +3,7 @@ from google import genai
 from google.genai import types
 from gtts import gTTS
 import io
+import base64
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Satyam's AI Assistant", page_icon="🤖", layout="centered")
@@ -11,7 +12,6 @@ st.set_page_config(page_title="Satyam's AI Assistant", page_icon="🤖", layout=
 st.markdown("""
     <style>
     .stApp { background-color: #EBF0F5; }
-    /* Force text inside messages to be clearly dark grey/black */
     .stChatMessage p, .stChatMessage span, .stChatMessage div { 
         color: #1E293B !important; 
     }
@@ -31,6 +31,17 @@ except:
 client = genai.Client(api_key=API_KEY)
 sys_msg = "You are a professional AI assistant built by Satyam, an AI Engineer (2024 batch). Respond very briefly and cleanly in 1-2 sentences max."
 
+# --- HELPER FUNCTION FOR AUTOPLAY AUDIO ---
+def play_audio_automatically(audio_bytes):
+    """Converts audio bytes into an autoplaying HTML audio element"""
+    b64 = base64.b64encode(audio_bytes).decode()
+    md = f"""
+        <audio autoplay="true">
+        <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
+        </audio>
+        """
+    st.markdown(md, unsafe_allow_html=True)
+
 # --- CHAT HISTORY LOGIC ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -40,6 +51,7 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
         if "audio_bytes" in message:
+            # Traditional audio layout bar kept for history playback control
             st.audio(message["audio_bytes"], format="audio/mp3")
 
 # --- SIDEBAR VOICE CONTROL ---
@@ -75,7 +87,6 @@ if audio and st.session_state.get('last_audio_id') != audio['id']:
                     mime_type="audio/wav"
                 )
                 
-                # Model handles multi-modal speech input beautifully, outputs pure text
                 response = client.models.generate_content(
                     model="gemini-2.5-flash", 
                     contents=[f"{sys_msg} Listen to this audio prompt and reply directly.", audio_part]
@@ -83,7 +94,7 @@ if audio and st.session_state.get('last_audio_id') != audio['id']:
                 
                 full_response = response.text
                 
-                # Use gTTS to seamlessly convert text response into spoken voice bytes
+                # Convert text response into spoken voice bytes
                 tts = gTTS(text=full_response, lang='en', slow=False)
                 audio_fp = io.BytesIO()
                 tts.write_to_fp(audio_fp)
@@ -93,6 +104,9 @@ if audio and st.session_state.get('last_audio_id') != audio['id']:
                 
                 msg_data = {"role": "assistant", "content": full_response, "audio_bytes": ai_audio_bytes}
                 st.session_state.messages.append(msg_data)
+                
+                # Trigger instant vocal autoplay before the interface state resets
+                play_audio_automatically(ai_audio_bytes)
                 st.rerun()
                 
             except Exception as e:
@@ -112,7 +126,6 @@ if prompt := st.chat_input("Ask me anything..."):
             )
             full_response = response.text
             
-            # Convert text response to voice audio stream
             tts = gTTS(text=full_response, lang='en', slow=False)
             audio_fp = io.BytesIO()
             tts.write_to_fp(audio_fp)
@@ -120,7 +133,7 @@ if prompt := st.chat_input("Ask me anything..."):
             
             st.markdown(full_response)
             if ai_audio_bytes:
-                st.audio(ai_audio_bytes, format="audio/mp3")
+                play_audio_automatically(ai_audio_bytes)
             
     msg_data = {"role": "assistant", "content": full_response, "audio_bytes": ai_audio_bytes}
     st.session_state.messages.append(msg_data)
