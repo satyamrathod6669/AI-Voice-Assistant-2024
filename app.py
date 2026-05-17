@@ -56,30 +56,36 @@ with st.sidebar:
 
 # --- AUDIO INPUT PROCESSING ---
 if audio:
-    # 1. Save user placeholder to history & display
+    # 1. Save user placeholder to history
     st.session_state.messages.append({"role": "user", "content": "🎤 *Sent a voice message*"})
     
-    # 2. Process audio bytes directly via Gemini's multimodal engine
+    # 2. Process audio bytes safely via Gemini's multimodal engine
     with st.chat_message("assistant"):
         with st.spinner("Listening to audio and generating response..."):
             try:
+                # Use Part.from_bytes helper to avoid validation crashes
+                from google.genai.types import Part
+                
+                audio_part = Part.from_bytes(
+                    data=audio['bytes'],
+                    mime_type="audio/wav"
+                )
+                
+                # Combine system instruction directly inside the call logic
                 response = client.models.generate_content(
                     model="gemini-2.0-flash-lite", 
-                    contents=[
-                        sys_msg,
-                        {"mime_type": "audio/wav", "data": audio['bytes']}
-                    ]
+                    contents=[f"{sys_msg} Please listen to this raw audio input and answer directly.", audio_part]
                 )
+                
                 full_response = response.text
                 st.markdown(full_response)
                 st.session_state.messages.append({"role": "assistant", "content": full_response})
                 
-                # Rerun to cleanly update the main chat window interface
+                # Clean refresh to render inside the viewport timeline
                 st.rerun()
                 
             except Exception as e:
                 st.error(f"Audio Processing Error: {e}")
-
 # --- TEXT INPUT HANDLING ---
 if prompt := st.chat_input("Ask me anything..."):
     # 1. Show User Message
