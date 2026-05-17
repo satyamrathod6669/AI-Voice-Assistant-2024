@@ -1,77 +1,101 @@
 import streamlit as st
 from google import genai
+from google.genai import types
 from streamlit_mic_recorder import mic_recorder
 
-# 1. Page Configuration
-st.set_page_config(page_title="AI Voice Assistant 2024", page_icon="🎙️")
-st.title("🎙️ AI Assistant - 2024 Batch")
+# --- PAGE CONFIG ---
+st.set_page_config(page_title="Satyam's AI Assistant", page_icon="🤖", layout="centered")
 
-# 2. Securely get API Key from Streamlit Secrets
-API_KEY = st.secrets["GEMINI_API_KEY"]
+# Custom CSS for a professional "Messenger" look
+st.markdown("""
+    <style>
+    .stApp { background-color: #F5F7FB; }
+    .stChatMessage { border-radius: 15px; margin-bottom: 10px; }
+    </style>
+    """, unsafe_allow_html=True)
+
+st.title("🤖 Satyam's AI Assistant")
+st.info("Batch 2024 AI Engineering Project")
+
+# --- SECURE API KEY ---
+try:
+    API_KEY = st.secrets["GEMINI_API_KEY"]
+except:
+    # Fallback for local testing
+    API_KEY = "AIzaSyCMpPyLybdthGF71BoRLJfxMSVWTrE6b3k"
+
 client = genai.Client(api_key=API_KEY)
+sys_msg = "You are a professional AI assistant built by Satyam, an AI Engineer (2024 batch)."
 
-# 3. Initialize Chat History
+# --- CHAT HISTORY LOGIC ---
 if "messages" not in st.session_state:
-    st.session_state.messages = [
-        {"role": "assistant", "content": "Hello Satyam! I'm your AI assistant. How can I help with your project today?"}
-    ]
+    st.session_state.messages = []
 
-# 4. Display Chat History
+# Display the conversation history
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# 5. Handle User Input
-if prompt := st.chat_input("Type your message here..."):
-    # Display user message
-    with st.chat_message("user"):
-        st.markdown(prompt)
-    st.session_state.messages.append({"role": "user", "content": prompt})
-
-    # 6. Generate AI Response
-    with st.chat_message("assistant"):
-        try:
-            # Use the most stable 2026 model string
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=prompt
-            )
-            
-            # Extract and display the text
-            if response.text:
-                full_response = response.text
-                st.markdown(full_response)
-                # Save to history
-                st.session_state.messages.append({"role": "assistant", "content": full_response})
-            else:
-                st.error("The model returned an empty response.")
-                
-        except Exception as e:
-            st.error(f"Technical Error: {e}")
-            st.info("Check your 'Manage App > Logs' for more details.")
-
-# 7. Sidebar with Project Info & Voice Input
+# --- SIDEBAR VOICE CONTROL ---
 with st.sidebar:
-    st.header("🚀 Project Control")
-    st.write("Role: AI Engineer (2024 Batch)")
+    st.header("🎙️ Voice Dashboard")
+    st.write("Click below to speak to the assistant.")
+    
+    # Microphone component
+    audio = mic_recorder(
+        start_prompt="⏺️ Record Voice",
+        stop_prompt="⏹️ Stop & Send",
+        key='voice_recorder'
+    )
     
     # Clear Chat Button
-    if st.button("🗑️ Clear Chat"):
+    st.write("---")
+    if st.button("🗑️ Clear Conversation"):
         st.session_state.messages = []
         st.rerun()
 
-    st.write("---")
-    st.subheader("🎙️ Voice Input")
+# --- AUDIO INPUT PROCESSING ---
+if audio:
+    # 1. Save user placeholder to history & display
+    st.session_state.messages.append({"role": "user", "content": "🎤 *Sent a voice message*"})
     
-    # This is the mic recorder component
-    audio = mic_recorder(
-        start_prompt="⏺️ Record Question",
-        stop_prompt="⏹️ Stop & Send",
-        key='my_recorder'
-    )
+    # 2. Process audio bytes directly via Gemini's multimodal engine
+    with st.chat_message("assistant"):
+        with st.spinner("Listening to audio and generating response..."):
+            try:
+                response = client.models.generate_content(
+                    model="gemini-2.0-flash-lite", 
+                    contents=[
+                        sys_msg,
+                        {"mime_type": "audio/wav", "data": audio['bytes']}
+                    ]
+                )
+                full_response = response.text
+                st.markdown(full_response)
+                st.session_state.messages.append({"role": "assistant", "content": full_response})
+                
+                # Rerun to cleanly update the main chat window interface
+                st.rerun()
+                
+            except Exception as e:
+                st.error(f"Audio Processing Error: {e}")
 
-    # Handle the audio once recording stops
-    if audio:
-        st.audio(audio['bytes'])
-        st.success("Audio captured! Transcribing...")
-        # We will add the transcription logic here next!
+# --- TEXT INPUT HANDLING ---
+if prompt := st.chat_input("Ask me anything..."):
+    # 1. Show User Message
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    # 2. Generate AI Response
+    with st.chat_message("assistant"):
+        with st.spinner("Thinking..."):
+            response = client.models.generate_content(
+                model="gemini-2.0-flash-lite", 
+                contents=f"{sys_msg} User: {prompt}"
+            )
+            full_response = response.text
+            st.markdown(full_response)
+            
+    # 3. Save to History
+    st.session_state.messages.append({"role": "assistant", "content": full_response})
