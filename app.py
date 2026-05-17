@@ -73,9 +73,8 @@ if audio:
                 
                 # Combine system instruction directly inside the call logic
                 response = client.models.generate_content(
-                    model="gemini-2.0-flash-lite", 
-                    contents=[f"{sys_msg} Please listen to this raw audio input and answer directly.", audio_part]
-                )
+                    model="gemini-2.5-flash-lite", 
+                    contents=[f"{sys_msg} Please listen to this raw audio input and answer directly.", audio_part])
                 
                 full_response = response.text
                 st.markdown(full_response)
