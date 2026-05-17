@@ -9,6 +9,7 @@ st.set_page_config(page_title="Satyam's AI Assistant", page_icon="🤖", layout=
 st.markdown("""
     <style>
     .stApp { background-color: #EBF0F5; }
+    /* Force text inside messages to be clearly dark grey/black */
     .stChatMessage p, .stChatMessage span, .stChatMessage div { 
         color: #1E293B !important; 
     }
@@ -55,6 +56,9 @@ with st.sidebar:
     st.write("---")
     if st.button("🗑️ Clear Conversation"):
         st.session_state.messages = []
+        # Clear loop checking states on flush
+        if 'last_audio_id' in st.session_state:
+            del st.session_state['last_audio_id']
         st.rerun()
 
 # --- AUDIO INPUT PROCESSING ---
@@ -79,8 +83,9 @@ if audio and st.session_state.get('last_audio_id') != audio['id']:
                     system_instruction=sys_msg
                 )
                 
+                # Using full gemini-2.5-flash for multimodal audio generation support
                 response = client.models.generate_content(
-                    model="gemini-2.5-flash-lite", 
+                    model="gemini-2.5-flash", 
                     contents=[audio_part],
                     config=config
                 )
@@ -120,7 +125,7 @@ if prompt := st.chat_input("Ask me anything..."):
                 system_instruction=sys_msg
             )
             response = client.models.generate_content(
-                model="gemini-2.5-flash-lite", 
+                model="gemini-2.5-flash", 
                 contents=prompt,
                 config=config
             )
