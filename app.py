@@ -7,7 +7,6 @@ import base64
 # ── PAGE CONFIG ────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Satyam's AI Assistant", page_icon="🤖", layout="centered")
 
-# ── STYLES ─────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@700;800&display=swap');
@@ -39,11 +38,6 @@ except Exception:
 client = genai.Client(api_key=API_KEY)
 SYS = "You are a professional AI assistant built by Satyam, an AI Engineer. Reply very briefly in 1 or 2 conversational sentences max."
 
-# ── READ TRANSCRIPT FROM QUERY PARAM (set by JS before rerun) ─────────────────
-user_text = st.query_params.get("q", "").strip()
-if user_text:
-    st.query_params.clear()
-
 # ── HEADER ─────────────────────────────────────────────────────────────────────
 st.markdown('<div class="va-card"><h2>🤖 Satyam\'s AI Assistant</h2><p>Click the orb → speak → get an instant AI reply</p></div>', unsafe_allow_html=True)
 
@@ -55,48 +49,87 @@ for turn in st.session_state.conversation:
 
 # ── AUTOPLAY AUDIO ─────────────────────────────────────────────────────────────
 if st.session_state.pending_audio:
-    b64 = st.session_state.pending_audio
-    st.markdown(f'<audio autoplay src="data:audio/mp3;base64,{b64}"></audio>', unsafe_allow_html=True)
+    st.markdown(f'<audio autoplay src="data:audio/mp3;base64,{st.session_state.pending_audio}"></audio>', unsafe_allow_html=True)
     st.session_state.pending_audio = None
 
-# ── SPEECH ORB UI ──────────────────────────────────────────────────────────────
-orb_html = """
-<style>
-#mic-orb {
-  width:90px; height:90px; border-radius:50%;
-  background:radial-gradient(circle at 35% 35%,#1e3a5f,#0c1a2e);
-  border:2px solid #38BDF8; cursor:pointer;
-  display:flex; align-items:center; justify-content:center;
-  font-size:2rem; margin:16px auto; transition:all 0.3s ease;
-}
-#mic-orb.listening  { animation:orbPulse 1.5s ease-in-out infinite; border-color:#34D399; box-shadow:0 0 30px rgba(52,211,153,0.3); }
-#mic-orb.processing { border-color:#38BDF8; animation:orbSpin 1s linear infinite; }
-@keyframes orbPulse { 0%,100%{box-shadow:0 0 0 0 rgba(52,211,153,0.5);transform:scale(1)} 50%{box-shadow:0 0 0 18px rgba(52,211,153,0);transform:scale(1.05)} }
-@keyframes orbSpin  { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
-#badge { display:inline-block; padding:4px 14px; border-radius:999px; font-family:monospace; font-size:0.75rem; background:#1E293B; color:#64748B; transition:all 0.3s; }
-#badge.listening  { background:rgba(52,211,153,0.15); color:#34D399; }
-#badge.processing { background:rgba(56,189,248,0.15); color:#38BDF8; }
-#badge.error      { background:rgba(248,113,113,0.15); color:#F87171; }
-#live-box { background:#020617; border-left:3px solid #38BDF8; border-radius:8px; padding:12px 16px; margin:14px 0; font-family:monospace; font-size:0.8rem; color:#64748B; min-height:42px; }
-#live-box.active { border-color:#34D399; color:#E2E8F0; }
-</style>
+# ── CUSTOM COMPONENT: Speech Orb ───────────────────────────────────────────────
+# Uses Streamlit.setComponentValue() — the ONLY guaranteed way to send
+# data from an iframe back to Python on Streamlit Cloud.
 
-<div style="text-align:center">
-  <div id="mic-orb" onclick="toggleMic()">🎙️</div>
-  <span id="badge">IDLE — click to start</span>
-</div>
+speech_component_html = """
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:transparent; font-family:'Space Mono',monospace; display:flex; flex-direction:column; align-items:center; padding:10px; }
+
+  #mic-orb {
+    width:90px; height:90px; border-radius:50%;
+    background:radial-gradient(circle at 35% 35%,#1e3a5f,#0c1a2e);
+    border:2px solid #38BDF8; cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+    font-size:2rem; margin:10px auto; transition:all 0.3s ease;
+    user-select:none;
+  }
+  #mic-orb.listening  { animation:orbPulse 1.5s ease-in-out infinite; border-color:#34D399; box-shadow:0 0 30px rgba(52,211,153,0.35); }
+  #mic-orb.processing { border-color:#38BDF8; animation:orbSpin 1s linear infinite; }
+  @keyframes orbPulse { 0%,100%{box-shadow:0 0 0 0 rgba(52,211,153,0.5);transform:scale(1)} 50%{box-shadow:0 0 0 18px rgba(52,211,153,0);transform:scale(1.05)} }
+  @keyframes orbSpin  { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+
+  #badge {
+    display:inline-block; padding:4px 16px; border-radius:999px;
+    font-size:0.72rem; background:#1E293B; color:#64748B;
+    transition:all 0.3s; margin-bottom:10px; letter-spacing:0.05em;
+  }
+  #badge.listening  { background:rgba(52,211,153,0.15); color:#34D399; }
+  #badge.processing { background:rgba(56,189,248,0.15); color:#38BDF8; }
+  #badge.error      { background:rgba(248,113,113,0.15); color:#F87171; }
+
+  #live-box {
+    width:100%; background:#020617; border-left:3px solid #38BDF8;
+    border-radius:8px; padding:10px 14px; font-size:0.78rem;
+    color:#64748B; min-height:40px; transition:border-color 0.3s;
+  }
+  #live-box.active { border-color:#34D399; color:#E2E8F0; }
+</style>
+</head>
+<body>
+
+<div id="mic-orb" onclick="toggleMic()">🎙️</div>
+<span id="badge">IDLE — click to start</span>
 <div id="live-box">Your speech will appear here…</div>
 
 <script>
-(function(){
+  // Load Streamlit component bridge
+  const StreamlitLib = window.parent.Streamlit;
+
+  // Inline the Streamlit component API since we are in declare_component iframe
+  function sendToStreamlit(value) {
+    // Standard Streamlit component message protocol
+    window.parent.postMessage({
+      type: "streamlit:setComponentValue",
+      value: value,
+      dataType: "json"
+    }, "*");
+  }
+
+  // Tell Streamlit this component is ready and set initial height
+  window.parent.postMessage({ type: "streamlit:componentReady", apiVersion: 1 }, "*");
+  window.parent.postMessage({ type: "streamlit:setFrameHeight", height: 200 }, "*");
+
   const orb     = document.getElementById('mic-orb');
   const badge   = document.getElementById('badge');
   const liveBox = document.getElementById('live-box');
   let recognition = null;
   let isListening = false;
+  let lastSent = null;   // prevent duplicate sends
 
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) { badge.textContent = 'Not supported — use Chrome/Edge'; badge.className = 'error'; }
+  if (!SR) {
+    badge.textContent = 'Use Chrome or Edge for mic support';
+    badge.className = 'error';
+  }
 
   window.toggleMic = function() {
     if (isListening) { stopListening(); return; }
@@ -118,9 +151,13 @@ orb_html = """
       }
       liveBox.textContent = final || interim;
       liveBox.classList.add('active');
-      if (final.trim()) {
+
+      if (final.trim() && final.trim() !== lastSent) {
+        lastSent = final.trim();
         stopListening();
-        sendToBackend(final.trim());
+        setProcessing();
+        // THIS is the correct way — postMessage to Streamlit
+        sendToStreamlit(final.trim());
       }
     };
 
@@ -150,47 +187,75 @@ orb_html = """
     try { recognition.stop(); } catch(e) {}
   }
 
-  function sendToBackend(text) {
+  function setProcessing() {
     orb.classList.add('processing');
     orb.textContent = '✨';
     badge.textContent = 'PROCESSING…';
     badge.className = 'processing';
-
-    // Set query param on PARENT window URL then navigate — Streamlit picks it up on reload
-    const url = new URL(window.parent.location.href);
-    url.searchParams.set('q', text);
-    window.parent.location.href = url.toString();   // full navigation = guaranteed Streamlit rerun
   }
-})();
+
+  // Reset orb when Streamlit sends updated props (happens after rerun completes)
+  window.addEventListener("message", (e) => {
+    if (e.data?.type === "streamlit:render") {
+      // Streamlit reran — reset orb back to idle
+      orb.classList.remove('processing', 'listening');
+      orb.textContent = '🎙️';
+      badge.textContent = 'IDLE — click to start';
+      badge.className = '';
+      liveBox.textContent = 'Your speech will appear here…';
+      liveBox.classList.remove('active');
+      lastSent = null;
+    }
+  });
 </script>
+</body>
+</html>
 """
 
-st.components.v1.html(orb_html, height=240, scrolling=False)
+# declare_component inline using html= trick via components.v1.html won't work —
+# we need the proper two-way bridge. Use st.components.v1.declare_component
+# with a data_url so no separate server/folder is needed.
 
-# ── PROCESS SPEECH ─────────────────────────────────────────────────────────────
-if user_text:
-    st.session_state.conversation.append({"role": "user", "text": user_text})
+import urllib.parse
 
-    with st.spinner("Thinking…"):
-        try:
-            resp = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=f"{SYS}\nUser: {user_text}"
-            )
-            reply = resp.text
+data_url = "data:text/html;charset=utf-8," + urllib.parse.quote(speech_component_html)
 
-            tts = gTTS(text=reply, lang="en", slow=False)
-            buf = io.BytesIO()
-            tts.write_to_fp(buf)
-            b64 = base64.b64encode(buf.getvalue()).decode()
+voice_component = st.components.v1.declare_component(
+    "voice_orb",
+    url=data_url
+)
 
-            st.session_state.conversation.append({"role": "assistant", "text": reply})
-            st.session_state.pending_audio = b64
+transcript = voice_component(key="voice_orb_main", default=None)
 
-        except Exception as e:
-            st.error(f"Gemini Error: {e}")
+# ── PROCESS TRANSCRIPT ─────────────────────────────────────────────────────────
+if transcript and isinstance(transcript, str) and transcript.strip():
+    user_text = transcript.strip()
 
-    st.rerun()
+    # Guard against reprocessing same value on subsequent reruns
+    if st.session_state.get("last_processed") != user_text:
+        st.session_state.last_processed = user_text
+        st.session_state.conversation.append({"role": "user", "text": user_text})
+
+        with st.spinner("Thinking…"):
+            try:
+                resp = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=f"{SYS}\nUser: {user_text}"
+                )
+                reply = resp.text
+
+                tts = gTTS(text=reply, lang="en", slow=False)
+                buf = io.BytesIO()
+                tts.write_to_fp(buf)
+                b64 = base64.b64encode(buf.getvalue()).decode()
+
+                st.session_state.conversation.append({"role": "assistant", "text": reply})
+                st.session_state.pending_audio = b64
+
+            except Exception as e:
+                st.error(f"Gemini Error: {e}")
+
+        st.rerun()
 
 # ── SIDEBAR ────────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -203,4 +268,5 @@ with st.sidebar:
         st.caption("No conversation yet. Click the orb and speak!")
     if st.button("🗑️ Clear History"):
         st.session_state.conversation = []
+        st.session_state.last_processed = None
         st.rerun()
