@@ -4,7 +4,6 @@ from google.genai import types
 from gtts import gTTS
 import io
 import base64
-import json
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Satyam's AI Assistant", page_icon="🤖", layout="centered")
@@ -60,7 +59,7 @@ if st.session_state.listening:
             window.audioInitialized = true;
             navigator.mediaDevices.getUserMedia({ audio: true })
                 .then(stream => {
-                    window.localAudioStream = stream; // Keep track of stream to close later
+                    window.localAudioStream = stream;
                     const audioContext = new AudioContext();
                     window.localAudioContext = audioContext;
                     
@@ -88,8 +87,6 @@ if st.session_state.listening:
                             if (speaking && (Date.now() - silenceStart > 1500)) {
                                 speaking = false;
                                 console.log("Voice pause detected. Sending parameter trigger...");
-                                
-                                // Direct, modern query param trigger to signal backend processing
                                 window.parent.location.search = "?voice_trigger=true";
                             }
                         }
@@ -100,9 +97,49 @@ if st.session_state.listening:
     """
     st.components.v1.html(ctx_js, height=0, width=0)
 else:
-    # JavaScript snippet to securely close the microphone if user pressed stop
     stop_js = """
     <script>
         if (window.audioInitialized) {
             if (window.localAudioStream) {
-                window.localAudioStream.getTracks().
+                window.localAudioStream.getTracks().forEach(track => track.stop());
+            }
+            if (window.localAudioContext) {
+                window.localAudioContext.close();
+            }
+            window.audioInitialized = false;
+            console.log("Microphone hardware completely stopped.");
+        }
+    </script>
+    """
+    st.components.v1.html(stop_js, height=0, width=0)
+
+# --- BACKEND PROCESSING PIPELINE ---
+if "voice_trigger" in st.query_params:
+    del st.query_params["voice_trigger"]
+    
+    with st.spinner("Processing your speech..."):
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash", 
+                contents=f"{sys_msg} The user just spoke to you natively. Give a crisp, natural response out loud."
+            )
+            full_response = response.text
+            
+            tts = gTTS(text=full_response, lang='en', slow=False)
+            audio_fp = io.BytesIO()
+            tts.write_to_fp(audio_fp)
+            ai_audio_bytes = audio_fp.getvalue()
+            
+            b64 = base64.b64encode(ai_audio_bytes).decode()
+            autoplay_html = f'<audio autoplay="true" src="data:audio/mp3;base64,{b64}"></audio>'
+            st.markdown(autoplay_html, unsafe_allow_html=True)
+            
+            st.session_state.conversation.append({"role": "Assistant", "text": full_response})
+            
+        except Exception as e:
+            st.error(f"Voice Assistant Sync Error: {e}")
+
+# --- DISPLAY CONVERSATION STREAM ---
+for turn in st.session_state.conversation:
+    with st.chat_message(turn["role"].lower()):
+        st.write(turn["text"])
