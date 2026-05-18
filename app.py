@@ -14,12 +14,37 @@ st.markdown("""
 html,body,.stApp { background:var(--bg) !important; color:var(--text); font-family:'Syne',sans-serif; }
 #MainMenu,footer,header { visibility:hidden; }
 .block-container { padding-top:1.5rem !important; }
-.va-card { background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:28px 32px; margin-bottom:20px; text-align:center; }
-.va-card h2 { font-size:1.6rem; font-weight:800; letter-spacing:-0.5px; margin:0 0 6px; }
+
+.va-card { background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:20px 32px; margin-bottom:16px; text-align:center; }
+.va-card h2 { font-size:1.6rem; font-weight:800; letter-spacing:-0.5px; margin:0 0 4px; }
 .va-card p  { color:var(--muted); font-size:0.88rem; margin:0; }
-.bubble-user  { background:#1e3a5f; border-radius:12px 12px 4px 12px; padding:10px 16px; margin:6px 0 6px auto; max-width:78%; font-size:0.9rem; }
-.bubble-ai    { background:var(--surface); border:1px solid var(--border); border-radius:12px 12px 12px 4px; padding:10px 16px; margin:6px auto 6px 0; max-width:78%; font-size:0.9rem; }
-.bubble-label { font-size:0.68rem; color:var(--muted); font-family:'Space Mono',monospace; margin-bottom:2px; }
+
+/* Scrollable chat area */
+.chat-container {
+    max-height: 420px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    margin-top: 16px;
+    scroll-behavior: smooth;
+}
+.chat-container::-webkit-scrollbar { width: 4px; }
+.chat-container::-webkit-scrollbar-track { background: transparent; }
+.chat-container::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+.chat-empty { color: var(--muted); font-size: 0.82rem; text-align: center; padding: 24px 0; font-family: 'Space Mono', monospace; }
+
+.bubble-wrap-user { display:flex; flex-direction:column; align-items:flex-end; }
+.bubble-wrap-ai   { display:flex; flex-direction:column; align-items:flex-start; }
+
+.bubble-user  { background:#1e3a5f; border-radius:12px 12px 4px 12px; padding:10px 16px; max-width:78%; font-size:0.88rem; line-height:1.5; }
+.bubble-ai    { background:#0F172A; border:1px solid var(--border); border-radius:12px 12px 12px 4px; padding:10px 16px; max-width:78%; font-size:0.88rem; line-height:1.5; }
+.bubble-label { font-size:0.65rem; color:var(--muted); font-family:'Space Mono',monospace; margin-bottom:3px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -42,9 +67,8 @@ SYS = (
     "Be helpful, friendly, and concise."
 )
 
-# ── TTS: edge-tts via subprocess ───────────────────────────────────────────────
+# ── TTS ────────────────────────────────────────────────────────────────────────
 def tts_edge(text: str):
-    """Run edge-tts as a subprocess — zero asyncio conflict."""
     try:
         import tempfile, os
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
@@ -67,7 +91,6 @@ def tts_edge(text: str):
     return None
 
 def tts_fallback(text: str) -> bytes:
-    """gTTS fallback if edge-tts fails."""
     tts = gTTS(text=text, lang="en", tld="co.in", slow=False)
     buf = io.BytesIO()
     tts.write_to_fp(buf)
@@ -148,11 +171,8 @@ voice_orb = components.declare_component("voice_orb", path=str(_comp_dir))
 # ── HEADER ─────────────────────────────────────────────────────────────────────
 st.markdown('<div class="va-card"><h2>🤖 Satyam\'s AI Assistant</h2><p>Click the orb → speak → get an instant AI reply</p></div>', unsafe_allow_html=True)
 
-# ── CONVERSATION DISPLAY ───────────────────────────────────────────────────────
-for turn in st.session_state.conversation:
-    icon = "YOU" if turn["role"] == "user" else "ASSISTANT"
-    cls  = "bubble-user" if turn["role"] == "user" else "bubble-ai"
-    st.markdown(f'<div class="bubble-label">{icon}</div><div class="{cls}">{turn["text"]}</div>', unsafe_allow_html=True)
+# ── VOICE ORB (always at top) ──────────────────────────────────────────────────
+transcript = voice_orb(key="voice_orb_main", default=None)
 
 # ── AUTOPLAY AUDIO ─────────────────────────────────────────────────────────────
 if st.session_state.pending_audio:
@@ -162,8 +182,31 @@ if st.session_state.pending_audio:
     )
     st.session_state.pending_audio = None
 
-# ── VOICE ORB ──────────────────────────────────────────────────────────────────
-transcript = voice_orb(key="voice_orb_main", default=None)
+# ── CHAT HISTORY (below orb, scrollable) ──────────────────────────────────────
+if st.session_state.conversation:
+    bubbles_html = '<div class="chat-container" id="chat-box">'
+    for turn in st.session_state.conversation:
+        if turn["role"] == "user":
+            bubbles_html += f'''
+                <div class="bubble-wrap-user">
+                    <div class="bubble-label">YOU</div>
+                    <div class="bubble-user">{turn["text"]}</div>
+                </div>'''
+        else:
+            bubbles_html += f'''
+                <div class="bubble-wrap-ai">
+                    <div class="bubble-label">ASSISTANT</div>
+                    <div class="bubble-ai">{turn["text"]}</div>
+                </div>'''
+    bubbles_html += '</div>'
+    # Auto-scroll to bottom
+    bubbles_html += "<script>var c=document.getElementById('chat-box');if(c)c.scrollTop=c.scrollHeight;</script>"
+    st.markdown(bubbles_html, unsafe_allow_html=True)
+else:
+    st.markdown(
+        '<div class="chat-container"><div class="chat-empty">💬 No messages yet — click the orb and speak!</div></div>',
+        unsafe_allow_html=True
+    )
 
 # ── PROCESS TRANSCRIPT ─────────────────────────────────────────────────────────
 if transcript and isinstance(transcript, str) and transcript.strip():
@@ -175,8 +218,6 @@ if transcript and isinstance(transcript, str) and transcript.strip():
 
         with st.spinner("Thinking…"):
             try:
-                # ── FIX: Build a single clean prompt string instead of
-                #         a history dict (avoids google-genai SDK format issues)
                 full_prompt = SYS + "\n\nConversation so far:\n"
                 for turn in st.session_state.conversation[:-1]:
                     role = "User" if turn["role"] == "user" else "Assistant"
