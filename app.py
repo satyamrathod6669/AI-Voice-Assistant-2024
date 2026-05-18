@@ -33,7 +33,6 @@ if st.session_state.listening:
     st.markdown('<p>Status: <span class="status-listening">● Microphone Streaming Live...</span></p>', unsafe_allow_html=True)
     if st.button("🛑 Stop Listening", use_container_width=True):
         st.session_state.listening = False
-        st.st.query_params.clear()
         st.rerun()
 else:
     st.markdown('<p>Status: <span class="status-stopped">■ Assistant Paused</span></p>', unsafe_allow_html=True)
@@ -53,85 +52,17 @@ client = genai.Client(api_key=API_KEY)
 sys_msg = "You are a professional AI assistant built by Satyam, an AI Engineer. Reply very briefly in 1 or 2 conversational sentences max."
 
 # --- LIVE TRANSCRIPT DOM DISPLAY PLACEHOLDER ---
-# This creates a safe text box in the UI that our JavaScript can write into in real-time
 st.markdown('<div id="transcript-container" class="live-transcript-box">🎙️ Say something... (Your live speech will appear here)</div>', unsafe_allow_html=True)
 
-# --- INJECT REAL-TIME SPEECH RECOGNITION (Web Speech API) ---
-if st.session_state.listening:
-    speech_js = """
-    <script>
-        const parentDoc = window.parent.document;
-        const displayBox = parentDoc.getElementById("transcript-container");
-        
-        if (!window.recognitionInitialized) {
-            window.recognitionInitialized = true;
-            
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            if (SpeechRecognition) {
-                const recognition = new SpeechRecognition();
-                recognition.continuous = true;
-                recognition.interimResults = true;
-                recognition.lang = 'en-US';
-                
-                window.activeRecognition = recognition;
-                
-                recognition.onresult = (event) => {
-                    let interimTranscript = '';
-                    let finalTranscript = '';
-                    
-                    for (let i = event.resultIndex; i < event.results.length; ++i) {
-                        if (event.results[i].isFinal) {
-                            finalTranscript += event.results[i][0].transcript;
-                        } else {
-                            interimTranscript += event.results[i][0].transcript;
-                        }
-                    }
-                    
-                    // Show text instantly on screen as the user speaks!
-                    if (displayBox) {
-                        displayBox.innerHTML = "<b>Listening:</b> " + (finalTranscript || interimTranscript);
-                    }
-                    
-                    // If a final statement is captured, send it over to the Gemini backend channel
-                    if (finalTranscript.trim().length > 0) {
-                        console.log("Speech complete. Passing to pipeline: " + finalTranscript);
-                        window.parent.location.search = "?user_speech=" + encodeURIComponent(finalTranscript.trim());
-                    }
-                };
-                
-                recognition.onerror = (err) => console.error("Speech Error: ", err);
-                recognition.onend = () => {
-                    // Loop mic access to keep it ambiently alive
-                    if (window.recognitionInitialized) recognition.start();
-                };
-                
-                recognition.start();
-            } else {
-                if (displayBox) displayBox.innerText = "❌ Browser Speech API not supported.";
-            }
-        }
-    </script>
-    """
-    st.components.v1.html(speech_js, height=0, width=0)
-else:
-    kill_speech_js = """
-    <script>
-        if (window.activeRecognition) {
-            window.recognitionInitialized = false;
-            window.activeRecognition.stop();
-            console.log("Continuous recognition terminated.");
-        }
-    </script>
-    """
-    st.components.v1.html(kill_speech_js, height=0, width=0)
-
 # --- BACKEND PIPELINE HANDLING ---
-if "user_speech" in st.query_params:
-    user_prompt = st.query_params["user_speech"]
-    # Clear parameter quickly to reset the refresh anchor loop
-    del st.query_params["user_speech"]
+# A hidden text input that acts as our communication bridge from JavaScript to Python
+user_speech_input = st.text_input("Hidden Input", key="hidden_voice_input", label_visibility="collapsed")
+
+if user_speech_input:
+    # Immediately extract and reset state to clear input buffer layout loop
+    user_prompt = user_speech_input
     
-    # Save the typed phrase to history layout
+    # Add text to visual logs history
     st.session_state.conversation.append({"role": "user", "text": user_prompt})
     
     with st.spinner("Thinking..."):
@@ -156,10 +87,75 @@ if "user_speech" in st.query_params:
             autoplay_html = f'<audio autoplay="true" src="data:audio/mp3;base64,{b64}"></audio>'
             st.markdown(autoplay_html, unsafe_allow_html=True)
             
-            st.rerun()
-            
         except Exception as e:
             st.error(f"Voice Assistant Engine Error: {e}")
+
+# --- INJECT REAL-TIME SPEECH RECOGNITION (Web Speech API) ---
+if st.session_state.listening:
+    speech_js = """
+    <script>
+        const parentDoc = window.parent.document;
+        
+        // Find elements securely in parent document viewport
+        const displayBox = parentDoc.getElementById("transcript-container");
+        const hiddenInput = parentDoc.querySelector('input[aria-label="Hidden Input"]');
+        
+        if (!window.recognitionInitialized) {
+            window.recognitionInitialized = true;
+            
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (SpeechRecognition) {
+                const recognition = new SpeechRecognition();
+                recognition.continuous = false; // Stop after a single full sentence pause
+                recognition.interimResults = true;
+                recognition.lang = 'en-US';
+                
+                window.activeRecognition = recognition;
+                
+                recognition.onresult = (event) => {
+                    let interimTranscript = '';
+                    let finalTranscript = '';
+                    
+                    for (let i = event.resultIndex; i < event.results.length; ++i) {
+                        if (event.results[i].isFinal) {
+                            finalTranscript += event.results[i][0].transcript;
+                        } else {
+                            interimTranscript += event.results[i][0].transcript;
+                        }
+                    }
+                    
+                    // Show live text rendering as the user speaks
+                    if (displayBox) {
+                        displayBox.innerHTML = "<b>Listening:</b> " + (finalTranscript || interimTranscript);
+                    }
+                    
+                    // If a complete phrase is verified, pass it to the hidden input box and trigger event
+                    if (finalTranscript.trim().length > 0 && hiddenInput) {
+                        hiddenInput.value = finalTranscript.trim();
+                        
+                        // Fire native keyboard/input change events so Streamlit captures it immediately
+                        hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
+                        hiddenInput.dispatchEvent(new KeyboardEvent('keydown', { keyCode: 13, bubbles: true })); // Enter Key
+                    }
+                };
+                
+                recognition.onerror = (err) => console.error("Speech Error: ", err);
+                
+                recognition.onend = () => {
+                    // Instantly reset ready-state for continuous flow processing loop
+                    if (window.recognitionInitialized) {
+                        recognition.start();
+                    }
+                };
+                
+                recognition.start();
+            } else {
+                if (displayBox) displayBox.innerText = "❌ Browser Speech API not supported.";
+            }
+        }
+    </script>
+    """
+    st.components.v1.html(speech_js, height=0, width=0)
 
 # --- DISPLAY CONVERSATION STREAM ---
 for turn in st.session_state.conversation:
