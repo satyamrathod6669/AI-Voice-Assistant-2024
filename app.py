@@ -3,6 +3,7 @@ import streamlit.components.v1 as components
 from google import genai
 from gtts import gTTS
 import io, base64, pathlib, subprocess, sys, os
+from datetime import datetime
 
 # ── PAGE CONFIG ────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Satyam's AI Assistant", page_icon="🤖", layout="centered")
@@ -317,7 +318,7 @@ if transcript and isinstance(transcript, str) and transcript.strip():
 
     if st.session_state.last_processed != user_text:
         st.session_state.last_processed = user_text
-        st.session_state.conversation.append({"role": "user", "text": user_text})
+        st.session_state.conversation.append({"role": "user", "text": user_text, "time": datetime.now().strftime("%H:%M:%S")})
 
         with st.spinner("Thinking…"):
             try:
@@ -329,7 +330,7 @@ if transcript and isinstance(transcript, str) and transcript.strip():
 
                 reply = generate_with_retry(full_prompt)
 
-                st.session_state.conversation.append({"role": "assistant", "text": reply})
+                st.session_state.conversation.append({"role": "assistant", "text": reply, "time": datetime.now().strftime("%H:%M:%S")})
                 st.session_state.pending_audio = speak(reply)
 
             except Exception as e:
@@ -348,7 +349,35 @@ with st.sidebar:
             st.markdown(f"**{icon} {t['role'].title()}:** {t['text']}")
     else:
         st.caption("No conversation yet. Click the orb and speak!")
-    if st.button("🗑️ Clear History"):
+    # ── Export chat ───────────────────────────────────────────────────────────
+    if st.session_state.conversation:
+        def build_export():
+            lines = [
+                "=" * 50,
+                "  SATYAM'S AI ASSISTANT — CHAT EXPORT",
+                f"  Date : {datetime.now().strftime('%d %B %Y')}",
+                f"  Time : {datetime.now().strftime('%I:%M %p')}",
+                "=" * 50, ""
+            ]
+            for t in st.session_state.conversation:
+                role  = "You" if t["role"] == "user" else "Assistant"
+                ts    = t.get("time", "--:--:--")
+                lines.append(f"[{ts}] {role}:")
+                lines.append(f"  {t['text']}")
+                lines.append("")
+            lines += ["=" * 50, "End of conversation", "=" * 50]
+            return "\n".join(lines)
+
+        filename = f"chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        st.download_button(
+            label="💾 Save Chat as .txt",
+            data=build_export(),
+            file_name=filename,
+            mime="text/plain",
+            use_container_width=True
+        )
+
+    if st.button("🗑️ Clear History", use_container_width=True):
         st.session_state.conversation   = []
         st.session_state.last_processed = None
         st.rerun()
