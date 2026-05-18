@@ -31,9 +31,9 @@ st.markdown('<div class="assistant-card"><h2>🤖 Satyam\'s Voice Assistant</h2>
 
 if st.session_state.listening:
     st.markdown('<p>Status: <span class="status-listening">● Microphone Streaming Live...</span></p>', unsafe_allow_html=True)
-    if st.button("🛑 Stop Listening", use_container_width=True):
+    # We add a clear key to this button so our JavaScript can target it instantly
+    if st.button("🛑 Stop Listening", key="control_mic_btn", use_container_width=True):
         st.session_state.listening = False
-        st.st.query_params.clear()
         st.rerun()
 else:
     st.markdown('<p>Status: <span class="status-stopped">■ Assistant Paused</span></p>', unsafe_allow_html=True)
@@ -52,53 +52,14 @@ except:
 client = genai.Client(api_key=API_KEY)
 sys_msg = "You are a professional AI assistant built by Satyam, an AI Engineer. Reply very briefly in 1 or 2 conversational sentences max."
 
-# --- LIVE TRANSCRIPT DOM DISPLAY PLACEHOLDER ---
+# --- LIVE TRANSCRIPT BOX ---
 st.markdown('<div id="transcript-container" class="live-transcript-box">🎙️ Say something... (Your live speech will appear here)</div>', unsafe_allow_html=True)
 
-# --- BACKEND PIPELINE EXECUTION ---
-# Safely handle incoming prompts from query strings without throwing DeltaGenerator exceptions
-query_params = st.query_params
-if "prompt_input" in query_params:
-    user_prompt = query_params["prompt_input"]
-    
-    # Instantly clear query params to drop the loop and preserve your API quota limits
-    st.query_params.clear()
-    
-    # Append the phrase string to conversation array
-    st.session_state.conversation.append({"role": "user", "text": user_prompt})
-    
-    with st.spinner("Thinking..."):
-        try:
-            response = client.models.generate_content(
-                model="gemini-2.5-flash", 
-                contents=f"{sys_msg} User: {user_prompt}"
-            )
-            full_response = response.text
-            
-            # Use gTTS to compile vocal response natively
-            tts = gTTS(text=full_response, lang='en', slow=False)
-            audio_fp = io.BytesIO()
-            tts.write_to_fp(audio_fp)
-            ai_audio_bytes = audio_fp.getvalue()
-            
-            st.session_state.conversation.append({"role": "Assistant", "text": full_response})
-            
-            # Inject raw HTML5 Autoplay directly into the viewport
-            b64 = base64.b64encode(ai_audio_bytes).decode()
-            autoplay_html = f'<audio autoplay="true" src="data:audio/mp3;base64,{b64}"></audio>'
-            st.markdown(autoplay_html, unsafe_allow_html=True)
-            
-            st.rerun()
-            
-        except Exception as e:
-            st.error(f"Voice Assistant Engine Error: {e}")
-
-# --- INJECT REAL-TIME SPEECH RECOGNITION (Web Speech API via Top Frame Routing) ---
+# --- INJECT REAL-TIME SPEECH RECOGNITION (Web Speech API) ---
 if st.session_state.listening:
     speech_js = """
     <script>
         const parentDoc = window.parent.document;
-        const displayBox = parentDoc.getElementById("transcript-container");
         
         if (!window.recognitionInitialized) {
             window.recognitionInitialized = true;
@@ -106,13 +67,14 @@ if st.session_state.listening:
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (SpeechRecognition) {
                 const recognition = new SpeechRecognition();
-                recognition.continuous = false; // Ends processing automatically at sentence completion pause
+                recognition.continuous = false; // Stop when the user stops speaking
                 recognition.interimResults = true;
                 recognition.lang = 'en-US';
                 
                 window.activeRecognition = recognition;
                 
                 recognition.onresult = (event) => {
+                    const displayBox = parentDoc.getElementById("transcript-container");
                     let interimTranscript = '';
                     let finalTranscript = '';
                     
@@ -128,16 +90,28 @@ if st.session_state.listening:
                         displayBox.innerHTML = "<b>Listening:</b> " + (finalTranscript || interimTranscript);
                     }
                     
-                    // Safely update the parent layout target URL using web search queries
+                    // When text is finalized, save it to browser memory and auto-click the backend refresh button
                     if (finalTranscript.trim().length > 0) {
-                        console.log("Speech text finalized. Updating Streamlit context...");
-                        window.parent.location.search = "?prompt_input=" + encodeURIComponent(finalTranscript.trim());
+                        localStorage.setItem("speech_text_payload", finalTranscript.trim());
+                        
+                        // Find the Streamlit stop button and fire a native physical click trigger
+                        setTimeout(() => {
+                            const buttons = parentDoc.querySelectorAll("button");
+                            for (let btn of buttons) {
+                                if (btn.innerText.includes("Stop Listening")) {
+                                    btn.click();
+                                    break;
+                                }
+                            }
+                        }, 300);
                     }
                 };
                 
                 recognition.onerror = (err) => console.error("Speech Error: ", err);
                 recognition.onend = () => {
-                    if (window.recognitionInitialized) recognition.start();
+                    if (window.recognitionInitialized && !localStorage.getItem("speech_text_payload")) {
+                        try { recognition.start(); } catch(e){}
+                    }
                 };
                 
                 recognition.start();
@@ -147,7 +121,57 @@ if st.session_state.listening:
     """
     st.components.v1.html(speech_js, height=0, width=0)
 
+# --- BACKEND PIPELINE EXECUTION ---
+# Detect if there's an unprocessed text payload sitting in the browser storage bridge
+get_stored_data_js = """
+<script>
+    const textData = localStorage.getItem("speech_text_payload");
+    if (textData) {
+        localStorage.removeItem("speech_text_payload"); // Clean instantly
+        window.parent.location.search = "?process_prompt=" + encodeURIComponent(textData);
+    }
+</script>
+"""
+
+# Read the modern parameter directly if the click script routed it successfully
+if "process_prompt" in st.query_params:
+    user_prompt = st.query_params["process_prompt"]
+    st.query_params.clear()
+    
+    # Auto-reactivate microphone loop state for the next turn
+    st.session_state.listening = True
+    st.session_state.conversation.append({"role": "user", "text": user_prompt})
+    
+    with st.spinner("Thinking..."):
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash", 
+                contents=f"{sys_msg} User: {user_prompt}"
+            )
+            full_response = response.text
+            
+            tts = gTTS(text=full_response, lang='en', slow=False)
+            audio_fp = io.BytesIO()
+            tts.write_to_fp(audio_fp)
+            ai_audio_bytes = audio_fp.getvalue()
+            
+            st.session_state.conversation.append({"role": "Assistant", "text": full_response})
+            
+            # Autoplay delivery pipeline injection
+            b64 = base64.b64encode(ai_audio_bytes).decode()
+            autoplay_html = f'<audio autoplay="true" src="data:audio/mp3;base64,{b64}"></audio>'
+            st.markdown(autoplay_html, unsafe_allow_html=True)
+            
+            st.rerun()
+            
+        except Exception as e:
+            st.error(f"Voice Assistant Engine Error: {e}")
+else:
+    # Always read from browser data bridge frame if parameter isn't active yet
+    st.components.v1.html(get_stored_data_js, height=0, width=0)
+
 # --- DISPLAY CONVERSATION STREAM ---
 for turn in st.session_state.conversation:
     with st.chat_message(turn["role"].lower()):
         st.write(turn["text"])
+        
