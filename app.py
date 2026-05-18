@@ -312,6 +312,41 @@ def render_chat(conversation):
 
 st.markdown(render_chat(st.session_state.conversation), unsafe_allow_html=True)
 
+# ── SAVE & CLEAR BUTTONS (below chat, always visible) ─────────────────────────
+if st.session_state.conversation:
+    col1, col2 = st.columns(2)
+
+    def build_export():
+        lines = [
+            "=" * 50,
+            "  SATYAM'S AI ASSISTANT — CHAT EXPORT",
+            f"  Date : {datetime.now().strftime('%d %B %Y')}",
+            f"  Time : {datetime.now().strftime('%I:%M %p')}",
+            "=" * 50, ""
+        ]
+        for t in st.session_state.conversation:
+            role = "You" if t["role"] == "user" else "Assistant"
+            ts   = t.get("time", "--:--:--")
+            lines.append(f"[{ts}] {role}:")
+            lines.append(f"  {t['text']}")
+            lines.append("")
+        lines += ["=" * 50, "End of conversation", "=" * 50]
+        return "\n".join(lines)
+
+    with col1:
+        st.download_button(
+            label="💾 Save Chat",
+            data=build_export(),
+            file_name=f"chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+            mime="text/plain",
+            use_container_width=True
+        )
+    with col2:
+        if st.button("🗑️ Clear Chat", use_container_width=True):
+            st.session_state.conversation   = []
+            st.session_state.last_processed = None
+            st.rerun()
+
 # ── PROCESS TRANSCRIPT ─────────────────────────────────────────────────────────
 if transcript and isinstance(transcript, str) and transcript.strip():
     user_text = transcript.strip()
