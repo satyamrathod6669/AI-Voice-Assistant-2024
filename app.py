@@ -8,13 +8,14 @@ import base64
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Satyam's AI Assistant", page_icon="🤖", layout="centered")
 
-# Dark, futuristic theme styling
+# Dark, ultra-modern tech theme styling
 st.markdown("""
     <style>
     .stApp { background-color: #0F172A; color: #F8FAFC; }
     .assistant-card { background-color: #1E293B; border-radius: 15px; padding: 25px; border: 1px solid #334155; text-align: center; margin-bottom: 20px;}
     .status-listening { color: #10B981; font-weight: bold; animation: pulse 2s infinite; }
     .status-stopped { color: #EF4444; font-weight: bold; }
+    .live-transcript-box { background-color: #020617; border-left: 4px solid #3B82F6; padding: 12px; border-radius: 6px; margin: 15px 0; font-style: italic; color: #94A3B8; text-align: left; }
     @keyframes pulse { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
     </style>
     """, unsafe_allow_html=True)
@@ -23,18 +24,19 @@ st.markdown("""
 if "conversation" not in st.session_state:
     st.session_state.conversation = []
 if "listening" not in st.session_state:
-    st.session_state.listening = True  # Default to listening on startup
+    st.session_state.listening = True
 
-# --- UI HEADER & TOGGLE BUTTON ---
+# --- UI HEADER & MAIN CONTROL ---
 st.markdown('<div class="assistant-card"><h2>🤖 Satyam\'s Voice Assistant</h2>', unsafe_allow_html=True)
 
 if st.session_state.listening:
-    st.markdown('<p>Status: <span class="status-listening">● Listening live... Speak anytime</span></p>', unsafe_allow_html=True)
+    st.markdown('<p>Status: <span class="status-listening">● Microphone Streaming Live...</span></p>', unsafe_allow_html=True)
     if st.button("🛑 Stop Listening", use_container_width=True):
         st.session_state.listening = False
+        st.st.query_params.clear()
         st.rerun()
 else:
-    st.markdown('<p>Status: <span class="status-stopped">■ Microphone Off</span></p>', unsafe_allow_html=True)
+    st.markdown('<p>Status: <span class="status-stopped">■ Assistant Paused</span></p>', unsafe_allow_html=True)
     if st.button("🎙️ Start Listening", use_container_width=True):
         st.session_state.listening = True
         st.rerun()
@@ -48,96 +50,116 @@ except:
     API_KEY = "AIzaSyCMpPyLybdthGF71BoRLJfxMSVWTrE6b3k"
 
 client = genai.Client(api_key=API_KEY)
-sys_msg = "You are a professional AI assistant built by Satyam, an AI Engineer. Reply very briefly in 1 or 2 sentences max."
+sys_msg = "You are a professional AI assistant built by Satyam, an AI Engineer. Reply very briefly in 1 or 2 conversational sentences max."
 
-# --- INJECT AMBIENT JAVASCRIPT MIC LISTENER (Only if active) ---
+# --- LIVE TRANSCRIPT DOM DISPLAY PLACEHOLDER ---
+# This creates a safe text box in the UI that our JavaScript can write into in real-time
+st.markdown('<div id="transcript-container" class="live-transcript-box">🎙️ Say something... (Your live speech will appear here)</div>', unsafe_allow_html=True)
+
+# --- INJECT REAL-TIME SPEECH RECOGNITION (Web Speech API) ---
 if st.session_state.listening:
-    ctx_js = """
+    speech_js = """
     <script>
         const parentDoc = window.parent.document;
-        if (!window.audioInitialized) {
-            window.audioInitialized = true;
-            navigator.mediaDevices.getUserMedia({ audio: true })
-                .then(stream => {
-                    window.localAudioStream = stream;
-                    const audioContext = new AudioContext();
-                    window.localAudioContext = audioContext;
+        const displayBox = parentDoc.getElementById("transcript-container");
+        
+        if (!window.recognitionInitialized) {
+            window.recognitionInitialized = true;
+            
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (SpeechRecognition) {
+                const recognition = new SpeechRecognition();
+                recognition.continuous = true;
+                recognition.interimResults = true;
+                recognition.lang = 'en-US';
+                
+                window.activeRecognition = recognition;
+                
+                recognition.onresult = (event) => {
+                    let interimTranscript = '';
+                    let finalTranscript = '';
                     
-                    const mediaStreamSource = audioContext.createMediaStreamSource(stream);
-                    const processor = audioContext.createScriptProcessor(2048, 1, 1);
-                    
-                    let silenceStart = Date.now();
-                    let speaking = false;
-                    
-                    mediaStreamSource.connect(processor);
-                    processor.connect(audioContext.destination);
-                    
-                    processor.onaudioprocess = (e) => {
-                        const inputData = e.inputBuffer.getChannelData(0);
-                        let sum = 0.0;
-                        for (let i = 0; i < inputData.length; i++) {
-                            sum += inputData[i] * inputData[i];
-                        }
-                        let rms = Math.sqrt(sum / inputData.length);
-                        
-                        if (rms > 0.02) { 
-                            if (!speaking) { speaking = true; }
-                            silenceStart = Date.now();
+                    for (let i = event.resultIndex; i < event.results.length; ++i) {
+                        if (event.results[i].isFinal) {
+                            finalTranscript += event.results[i][0].transcript;
                         } else {
-                            if (speaking && (Date.now() - silenceStart > 1500)) {
-                                speaking = false;
-                                console.log("Voice pause detected. Sending parameter trigger...");
-                                window.parent.location.search = "?voice_trigger=true";
-                            }
+                            interimTranscript += event.results[i][0].transcript;
                         }
-                    };
-                }).catch(err => console.error("Mic Access Error: ", err));
+                    }
+                    
+                    // Show text instantly on screen as the user speaks!
+                    if (displayBox) {
+                        displayBox.innerHTML = "<b>Listening:</b> " + (finalTranscript || interimTranscript);
+                    }
+                    
+                    // If a final statement is captured, send it over to the Gemini backend channel
+                    if (finalTranscript.trim().length > 0) {
+                        console.log("Speech complete. Passing to pipeline: " + finalTranscript);
+                        window.parent.location.search = "?user_speech=" + encodeURIComponent(finalTranscript.trim());
+                    }
+                };
+                
+                recognition.onerror = (err) => console.error("Speech Error: ", err);
+                recognition.onend = () => {
+                    // Loop mic access to keep it ambiently alive
+                    if (window.recognitionInitialized) recognition.start();
+                };
+                
+                recognition.start();
+            } else {
+                if (displayBox) displayBox.innerText = "❌ Browser Speech API not supported.";
+            }
         }
     </script>
     """
-    st.components.v1.html(ctx_js, height=0, width=0)
+    st.components.v1.html(speech_js, height=0, width=0)
 else:
-    stop_js = """
+    kill_speech_js = """
     <script>
-        if (window.audioInitialized) {
-            if (window.localAudioStream) {
-                window.localAudioStream.getTracks().forEach(track => track.stop());
-            }
-            if (window.localAudioContext) {
-                window.localAudioContext.close();
-            }
-            window.audioInitialized = false;
-            console.log("Microphone hardware completely stopped.");
+        if (window.activeRecognition) {
+            window.recognitionInitialized = false;
+            window.activeRecognition.stop();
+            console.log("Continuous recognition terminated.");
         }
     </script>
     """
-    st.components.v1.html(stop_js, height=0, width=0)
+    st.components.v1.html(kill_speech_js, height=0, width=0)
 
-# --- BACKEND PROCESSING PIPELINE ---
-if "voice_trigger" in st.query_params:
-    del st.query_params["voice_trigger"]
+# --- BACKEND PIPELINE HANDLING ---
+if "user_speech" in st.query_params:
+    user_prompt = st.query_params["user_speech"]
+    # Clear parameter quickly to reset the refresh anchor loop
+    del st.query_params["user_speech"]
     
-    with st.spinner("Processing your speech..."):
+    # Save the typed phrase to history layout
+    st.session_state.conversation.append({"role": "user", "text": user_prompt})
+    
+    with st.spinner("Thinking..."):
         try:
             response = client.models.generate_content(
                 model="gemini-2.5-flash", 
-                contents=f"{sys_msg} The user just spoke to you natively. Give a crisp, natural response out loud."
+                contents=f"{sys_msg} User: {user_prompt}"
             )
             full_response = response.text
             
+            # Use gTTS to compile vocal response natively
             tts = gTTS(text=full_response, lang='en', slow=False)
             audio_fp = io.BytesIO()
             tts.write_to_fp(audio_fp)
             ai_audio_bytes = audio_fp.getvalue()
             
+            # Append reply object to visual logs
+            st.session_state.conversation.append({"role": "Assistant", "text": full_response})
+            
+            # Inject raw HTML5 Autoplay directly into the viewport
             b64 = base64.b64encode(ai_audio_bytes).decode()
             autoplay_html = f'<audio autoplay="true" src="data:audio/mp3;base64,{b64}"></audio>'
             st.markdown(autoplay_html, unsafe_allow_html=True)
             
-            st.session_state.conversation.append({"role": "Assistant", "text": full_response})
+            st.rerun()
             
         except Exception as e:
-            st.error(f"Voice Assistant Sync Error: {e}")
+            st.error(f"Voice Assistant Engine Error: {e}")
 
 # --- DISPLAY CONVERSATION STREAM ---
 for turn in st.session_state.conversation:
