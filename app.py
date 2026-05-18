@@ -4,7 +4,6 @@ from google import genai
 from gtts import gTTS
 import io
 import base64
-import os
 
 # ── PAGE CONFIG ────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Satyam's AI Assistant", page_icon="🤖", layout="centered")
@@ -43,9 +42,8 @@ client = genai.Client(api_key=API_KEY)
 SYS = "You are a professional AI assistant built by Satyam, an AI Engineer. Reply very briefly in 1 or 2 conversational sentences max."
 
 # ── REGISTER CUSTOM COMPONENT ──────────────────────────────────────────────────
-# voice_component/ folder must sit next to app.py in the repo root
-COMPONENT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voice_component")
-voice_orb = components.declare_component("voice_orb", path=COMPONENT_DIR)
+# Use relative path — Streamlit Cloud runs from the repo root
+voice_orb = components.declare_component("voice_orb", path="voice_component")
 
 # ── HEADER ─────────────────────────────────────────────────────────────────────
 st.markdown('<div class="va-card"><h2>🤖 Satyam\'s AI Assistant</h2><p>Click the orb → speak → get an instant AI reply</p></div>', unsafe_allow_html=True)
