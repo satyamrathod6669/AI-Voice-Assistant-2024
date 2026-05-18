@@ -1,5 +1,4 @@
 import streamlit as st
-from streamlit_js_eval import streamlit_js_eval
 from google import genai
 from gtts import gTTS
 import io
@@ -19,8 +18,8 @@ html,body,.stApp { background:var(--bg) !important; color:var(--text); font-fami
 .va-card { background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:28px 32px; margin-bottom:20px; text-align:center; }
 .va-card h2 { font-size:1.6rem; font-weight:800; letter-spacing:-0.5px; margin:0 0 6px; }
 .va-card p  { color:var(--muted); font-size:0.88rem; margin:0; }
-.bubble-user { background:#1e3a5f; border-radius:12px 12px 4px 12px; padding:10px 16px; margin:6px 0 6px auto; max-width:78%; font-size:0.9rem; }
-.bubble-ai   { background:var(--surface); border:1px solid var(--border); border-radius:12px 12px 12px 4px; padding:10px 16px; margin:6px auto 6px 0; max-width:78%; font-size:0.9rem; }
+.bubble-user  { background:#1e3a5f; border-radius:12px 12px 4px 12px; padding:10px 16px; margin:6px 0 6px auto; max-width:78%; font-size:0.9rem; }
+.bubble-ai    { background:var(--surface); border:1px solid var(--border); border-radius:12px 12px 12px 4px; padding:10px 16px; margin:6px auto 6px 0; max-width:78%; font-size:0.9rem; }
 .bubble-label { font-size:0.68rem; color:var(--muted); font-family:'Space Mono',monospace; margin-bottom:2px; }
 </style>
 """, unsafe_allow_html=True)
@@ -40,6 +39,11 @@ except Exception:
 client = genai.Client(api_key=API_KEY)
 SYS = "You are a professional AI assistant built by Satyam, an AI Engineer. Reply very briefly in 1 or 2 conversational sentences max."
 
+# ── READ TRANSCRIPT FROM QUERY PARAM (set by JS before rerun) ─────────────────
+user_text = st.query_params.get("q", "").strip()
+if user_text:
+    st.query_params.clear()
+
 # ── HEADER ─────────────────────────────────────────────────────────────────────
 st.markdown('<div class="va-card"><h2>🤖 Satyam\'s AI Assistant</h2><p>Click the orb → speak → get an instant AI reply</p></div>', unsafe_allow_html=True)
 
@@ -49,33 +53,13 @@ for turn in st.session_state.conversation:
     cls  = "bubble-user" if turn["role"] == "user" else "bubble-ai"
     st.markdown(f'<div class="bubble-label">{icon}</div><div class="{cls}">{turn["text"]}</div>', unsafe_allow_html=True)
 
-# ── AUTOPLAY AUDIO (after rerun) ───────────────────────────────────────────────
+# ── AUTOPLAY AUDIO ─────────────────────────────────────────────────────────────
 if st.session_state.pending_audio:
     b64 = st.session_state.pending_audio
     st.markdown(f'<audio autoplay src="data:audio/mp3;base64,{b64}"></audio>', unsafe_allow_html=True)
     st.session_state.pending_audio = None
 
-# ── SPEECH UI + JS BRIDGE ──────────────────────────────────────────────────────
-# streamlit_js_eval runs JS in the browser and returns the result to Python.
-# We use it to get the final speech transcript from Web Speech API.
-
-speech_result = streamlit_js_eval(
-    js_expressions="""
-    new Promise((resolve) => {
-        // If a result is already queued from a previous recognition, return it immediately
-        if (window._pendingSpeechResult) {
-            const val = window._pendingSpeechResult;
-            window._pendingSpeechResult = null;
-            resolve(val);
-            return;
-        }
-        resolve(null);  // No result yet
-    })
-    """,
-    key="speech_poll"
-)
-
-# ── SPEECH ORB UI (injected HTML/JS, self-contained) ──────────────────────────
+# ── SPEECH ORB UI ──────────────────────────────────────────────────────────────
 orb_html = """
 <style>
 #mic-orb {
@@ -83,30 +67,17 @@ orb_html = """
   background:radial-gradient(circle at 35% 35%,#1e3a5f,#0c1a2e);
   border:2px solid #38BDF8; cursor:pointer;
   display:flex; align-items:center; justify-content:center;
-  font-size:2rem; margin:16px auto;
-  transition:all 0.3s ease;
-  box-shadow:0 0 0 0 rgba(56,189,248,0.4);
+  font-size:2rem; margin:16px auto; transition:all 0.3s ease;
 }
-#mic-orb.listening {
-  animation:orbPulse 1.5s ease-in-out infinite;
-  border-color:#34D399; box-shadow:0 0 30px rgba(52,211,153,0.3);
-}
+#mic-orb.listening  { animation:orbPulse 1.5s ease-in-out infinite; border-color:#34D399; box-shadow:0 0 30px rgba(52,211,153,0.3); }
 #mic-orb.processing { border-color:#38BDF8; animation:orbSpin 1s linear infinite; }
 @keyframes orbPulse { 0%,100%{box-shadow:0 0 0 0 rgba(52,211,153,0.5);transform:scale(1)} 50%{box-shadow:0 0 0 18px rgba(52,211,153,0);transform:scale(1.05)} }
 @keyframes orbSpin  { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
-#badge {
-  display:inline-block; padding:4px 14px; border-radius:999px;
-  font-family:'Space Mono',monospace; font-size:0.75rem;
-  background:#1E293B; color:#64748B; transition:all 0.3s;
-}
+#badge { display:inline-block; padding:4px 14px; border-radius:999px; font-family:monospace; font-size:0.75rem; background:#1E293B; color:#64748B; transition:all 0.3s; }
 #badge.listening  { background:rgba(52,211,153,0.15); color:#34D399; }
 #badge.processing { background:rgba(56,189,248,0.15); color:#38BDF8; }
 #badge.error      { background:rgba(248,113,113,0.15); color:#F87171; }
-#live-box {
-  background:#020617; border-left:3px solid #38BDF8; border-radius:8px;
-  padding:12px 16px; margin:14px 0;
-  font-family:'Space Mono',monospace; font-size:0.8rem; color:#64748B; min-height:42px;
-}
+#live-box { background:#020617; border-left:3px solid #38BDF8; border-radius:8px; padding:12px 16px; margin:14px 0; font-family:monospace; font-size:0.8rem; color:#64748B; min-height:42px; }
 #live-box.active { border-color:#34D399; color:#E2E8F0; }
 </style>
 
@@ -125,10 +96,7 @@ orb_html = """
   let isListening = false;
 
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) {
-    badge.textContent = 'Speech API not supported — use Chrome/Edge';
-    badge.className = 'error';
-  }
+  if (!SR) { badge.textContent = 'Not supported — use Chrome/Edge'; badge.className = 'error'; }
 
   window.toggleMic = function() {
     if (isListening) { stopListening(); return; }
@@ -150,15 +118,9 @@ orb_html = """
       }
       liveBox.textContent = final || interim;
       liveBox.classList.add('active');
-
       if (final.trim()) {
         stopListening();
-        // Store result for Python to pick up on next poll
-        window._pendingSpeechResult = final.trim();
-        orb.classList.add('processing');
-        orb.textContent = '✨';
-        badge.textContent = 'PROCESSING…';
-        badge.className = 'processing';
+        sendToBackend(final.trim());
       }
     };
 
@@ -187,15 +149,26 @@ orb_html = """
     liveBox.classList.remove('active');
     try { recognition.stop(); } catch(e) {}
   }
+
+  function sendToBackend(text) {
+    orb.classList.add('processing');
+    orb.textContent = '✨';
+    badge.textContent = 'PROCESSING…';
+    badge.className = 'processing';
+
+    // Set query param on PARENT window URL then navigate — Streamlit picks it up on reload
+    const url = new URL(window.parent.location.href);
+    url.searchParams.set('q', text);
+    window.parent.location.href = url.toString();   // full navigation = guaranteed Streamlit rerun
+  }
 })();
 </script>
 """
 
-st.components.v1.html(orb_html, height=220, scrolling=False)
+st.components.v1.html(orb_html, height=240, scrolling=False)
 
-# ── PROCESS SPEECH RESULT ──────────────────────────────────────────────────────
-if speech_result:
-    user_text = str(speech_result).strip()
+# ── PROCESS SPEECH ─────────────────────────────────────────────────────────────
+if user_text:
     st.session_state.conversation.append({"role": "user", "text": user_text})
 
     with st.spinner("Thinking…"):
@@ -215,7 +188,7 @@ if speech_result:
             st.session_state.pending_audio = b64
 
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"Gemini Error: {e}")
 
     st.rerun()
 
