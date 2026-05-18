@@ -134,7 +134,7 @@ except Exception:
 client = genai.Client(api_key=API_KEY)
 
 # ✅ Using gemini-1.5-flash — much higher free quota than gemini-2.5-flash
-MODEL = "gemini-1.5-flash"
+MODEL = "models/gemini-1.5-flash-latest"
 
 SYS = (
     "You are a professional AI assistant built by Satyam, an AI Engineer. "
