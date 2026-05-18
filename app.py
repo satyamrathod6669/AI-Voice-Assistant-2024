@@ -12,7 +12,7 @@ except Exception:
     GSPREAD_OK = False
 
 # ── PAGE CONFIG ────────────────────────────────────────────────────────────────
-st.set_page_config(page_title="Satyam's AI Assistant", page_icon="🤖", layout="centered")
+st.set_page_config(page_title="Satyam's AI Assistant", page_icon="🤖", layout="centered", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
@@ -492,3 +492,32 @@ with st.sidebar:
         st.session_state.conversation   = []
         st.session_state.last_processed = None
         st.rerun()
+
+    # ── View all past logs ─────────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("### 🗂️ All Past Chats")
+    all_logs = load_all_chats()
+    if all_logs:
+        # Group by session
+        sessions = {}
+        for msg in all_logs:
+            sid = msg.get("session", "unknown")
+            sessions.setdefault(sid, []).append(msg)
+
+        for sid, msgs in sorted(sessions.items(), reverse=True):
+            date = msgs[0].get("date", "")
+            with st.expander(f"📅 {date}  |  Session: {sid}", expanded=False):
+                for m in msgs:
+                    icon = "🧑" if m["role"] == "User" else "🤖"
+                    st.markdown(f"**{icon} [{m['time']}] {m['role']}:** {m['text']}")
+
+        # Download all logs as JSON
+        st.download_button(
+            label="⬇️ Download All Logs",
+            data=json.dumps(all_logs, indent=2),
+            file_name=f"all_chats_{datetime.now().strftime('%Y%m%d')}.json",
+            mime="application/json",
+            use_container_width=True
+        )
+    else:
+        st.caption("No past logs yet.")
