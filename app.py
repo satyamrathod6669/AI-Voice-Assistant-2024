@@ -2,8 +2,14 @@ import streamlit as st
 import streamlit.components.v1 as components
 from google import genai
 from gtts import gTTS
-import io, base64, pathlib, subprocess, sys, os
+import io, base64, pathlib, subprocess, sys, os, json
 from datetime import datetime
+try:
+    import gspread
+    from google.oauth2.service_account import Credentials
+    GSPREAD_OK = True
+except Exception:
+    GSPREAD_OK = False
 
 # ── PAGE CONFIG ────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Satyam's AI Assistant", page_icon="🤖", layout="centered")
@@ -125,6 +131,7 @@ html,body,.stApp { background:var(--bg) !important; color:var(--text); font-fami
 if "conversation"   not in st.session_state: st.session_state.conversation   = []
 if "pending_audio"  not in st.session_state: st.session_state.pending_audio  = None
 if "last_processed" not in st.session_state: st.session_state.last_processed = None
+if "session_id"    not in st.session_state: st.session_state.session_id    = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 # ── GEMINI CLIENT ──────────────────────────────────────────────────────────────
 try:
@@ -141,6 +148,71 @@ SYS = (
     "Reply very briefly in 1 or 2 conversational sentences max. "
     "Be helpful, friendly, and concise."
 )
+
+# ── AUTO-SAVE: LOCAL JSON ─────────────────────────────────────────────────────
+CHAT_FILE = pathlib.Path("chat_logs.json")
+
+def load_all_chats():
+    if CHAT_FILE.exists():
+        try:
+            with open(CHAT_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return []
+
+def save_message_local(role: str, text: str, ts: str):
+    """Append one message to the local JSON log."""
+    logs = load_all_chats()
+    logs.append({
+        "date": datetime.now().strftime("%Y-%m-%d"),
+        "time": ts,
+        "role": role,
+        "text": text,
+        "session": st.session_state.get("session_id", "unknown")
+    })
+    with open(CHAT_FILE, "w") as f:
+        json.dump(logs, f, indent=2)
+
+# ── AUTO-SAVE: GOOGLE SHEETS ──────────────────────────────────────────────────
+def get_sheet():
+    """Return the Google Sheet worksheet, or None if not configured."""
+    if not GSPREAD_OK:
+        return None
+    try:
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        scopes = ["https://spreadsheets.google.com/feeds",
+                  "https://www.googleapis.com/auth/drive"]
+        creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+        gc    = gspread.authorize(creds)
+        sh    = gc.open(st.secrets["SHEET_NAME"])
+        ws    = sh.sheet1
+        # Add header row if sheet is empty
+        if ws.row_count == 0 or ws.cell(1, 1).value != "Date":
+            ws.insert_row(["Date", "Time", "Session", "Role", "Message"], 1)
+        return ws
+    except Exception:
+        return None
+
+def save_message_sheets(role: str, text: str, ts: str):
+    """Append one message row to Google Sheets."""
+    try:
+        ws = get_sheet()
+        if ws:
+            ws.append_row([
+                datetime.now().strftime("%Y-%m-%d"),
+                ts,
+                st.session_state.get("session_id", "unknown"),
+                role,
+                text
+            ])
+    except Exception:
+        pass   # fail silently — never crash the app
+
+def auto_save(role: str, text: str, ts: str):
+    """Save to both local JSON and Google Sheets."""
+    save_message_local(role, text, ts)
+    save_message_sheets(role, text, ts)
 
 # ── GENERATE WITH AUTO-RETRY on 429 ───────────────────────────────────────────
 import time
@@ -353,7 +425,9 @@ if transcript and isinstance(transcript, str) and transcript.strip():
 
     if st.session_state.last_processed != user_text:
         st.session_state.last_processed = user_text
-        st.session_state.conversation.append({"role": "user", "text": user_text, "time": datetime.now().strftime("%H:%M:%S")})
+        user_ts = datetime.now().strftime("%H:%M:%S")
+        st.session_state.conversation.append({"role": "user", "text": user_text, "time": user_ts})
+        auto_save("User", user_text, user_ts)
 
         with st.spinner("Thinking…"):
             try:
@@ -365,7 +439,9 @@ if transcript and isinstance(transcript, str) and transcript.strip():
 
                 reply = generate_with_retry(full_prompt)
 
-                st.session_state.conversation.append({"role": "assistant", "text": reply, "time": datetime.now().strftime("%H:%M:%S")})
+                ai_ts = datetime.now().strftime("%H:%M:%S")
+                st.session_state.conversation.append({"role": "assistant", "text": reply, "time": ai_ts})
+                auto_save("Assistant", reply, ai_ts)
                 st.session_state.pending_audio = speak(reply)
 
             except Exception as e:
