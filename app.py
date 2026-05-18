@@ -168,9 +168,18 @@ if transcript and isinstance(transcript, str) and transcript.strip():
         st.session_state.conversation.append({"role": "user", "text": user_text})
         with st.spinner("Thinking…"):
             try:
+                # Build full conversation history so model has context
+                history = [
+                    {"role": "user",  "parts": [{"text": SYS}]},
+                    {"role": "model", "parts": [{"text": "Understood. I will reply briefly in 1-2 sentences."}]}
+                ]
+                for turn in st.session_state.conversation:
+                    role = "user" if turn["role"] == "user" else "model"
+                    history.append({"role": role, "parts": [{"text": turn["text"]}]})
+
                 resp = client.models.generate_content(
                     model="gemini-2.5-flash",
-                    contents=f"{SYS}\nUser: {user_text}"
+                    contents=history
                 )
                 reply = resp.text
                 tts = gTTS(text=reply, lang="en", slow=False)
