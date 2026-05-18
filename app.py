@@ -54,51 +54,12 @@ sys_msg = "You are a professional AI assistant built by Satyam, an AI Engineer. 
 # --- LIVE TRANSCRIPT DOM DISPLAY PLACEHOLDER ---
 st.markdown('<div id="transcript-container" class="live-transcript-box">🎙️ Say something... (Your live speech will appear here)</div>', unsafe_allow_html=True)
 
-# --- BACKEND PIPELINE HANDLING ---
-# A hidden text input that acts as our communication bridge from JavaScript to Python
-user_speech_input = st.text_input("Hidden Input", key="hidden_voice_input", label_visibility="collapsed")
-
-if user_speech_input:
-    # Immediately extract and reset state to clear input buffer layout loop
-    user_prompt = user_speech_input
-    
-    # Add text to visual logs history
-    st.session_state.conversation.append({"role": "user", "text": user_prompt})
-    
-    with st.spinner("Thinking..."):
-        try:
-            response = client.models.generate_content(
-                model="gemini-2.5-flash", 
-                contents=f"{sys_msg} User: {user_prompt}"
-            )
-            full_response = response.text
-            
-            # Use gTTS to compile vocal response natively
-            tts = gTTS(text=full_response, lang='en', slow=False)
-            audio_fp = io.BytesIO()
-            tts.write_to_fp(audio_fp)
-            ai_audio_bytes = audio_fp.getvalue()
-            
-            # Append reply object to visual logs
-            st.session_state.conversation.append({"role": "Assistant", "text": full_response})
-            
-            # Inject raw HTML5 Autoplay directly into the viewport
-            b64 = base64.b64encode(ai_audio_bytes).decode()
-            autoplay_html = f'<audio autoplay="true" src="data:audio/mp3;base64,{b64}"></audio>'
-            st.markdown(autoplay_html, unsafe_allow_html=True)
-            
-        except Exception as e:
-            st.error(f"Voice Assistant Engine Error: {e}")
-
 # --- INJECT REAL-TIME SPEECH RECOGNITION (Web Speech API) ---
 if st.session_state.listening:
     speech_js = """
     <script>
         const parentDoc = window.parent.document;
-        
-        // Find elements securely in parent document viewport
         const displayBox = parentDoc.getElementById("transcript-container");
-        const hiddenInput = parentDoc.querySelector('input[aria-label="Hidden Input"]');
         
         if (!window.recognitionInitialized) {
             window.recognitionInitialized = true;
@@ -106,7 +67,7 @@ if st.session_state.listening:
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (SpeechRecognition) {
                 const recognition = new SpeechRecognition();
-                recognition.continuous = false; // Stop after a single full sentence pause
+                recognition.continuous = false; // Processes sentence-by-sentence cleanly
                 recognition.interimResults = true;
                 recognition.lang = 'en-US';
                 
@@ -124,38 +85,66 @@ if st.session_state.listening:
                         }
                     }
                     
-                    // Show live text rendering as the user speaks
                     if (displayBox) {
                         displayBox.innerHTML = "<b>Listening:</b> " + (finalTranscript || interimTranscript);
                     }
                     
-                    // If a complete phrase is verified, pass it to the hidden input box and trigger event
-                    if (finalTranscript.trim().length > 0 && hiddenInput) {
-                        hiddenInput.value = finalTranscript.trim();
-                        
-                        // Fire native keyboard/input change events so Streamlit captures it immediately
-                        hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
-                        hiddenInput.dispatchEvent(new KeyboardEvent('keydown', { keyCode: 13, bubbles: true })); // Enter Key
+                    // Directly query route parameters if text is ready
+                    if (finalTranscript.trim().length > 0) {
+                        window.parent.location.href = window.parent.location.origin + window.parent.location.pathname + "?msg=" + encodeURIComponent(finalTranscript.trim());
                     }
                 };
                 
                 recognition.onerror = (err) => console.error("Speech Error: ", err);
-                
                 recognition.onend = () => {
-                    // Instantly reset ready-state for continuous flow processing loop
-                    if (window.recognitionInitialized) {
-                        recognition.start();
-                    }
+                    if (window.recognitionInitialized) recognition.start();
                 };
                 
                 recognition.start();
-            } else {
-                if (displayBox) displayBox.innerText = "❌ Browser Speech API not supported.";
             }
         }
     </script>
     """
     st.components.v1.html(speech_js, height=0, width=0)
+
+# --- BACKEND PIPELINE HANDLING ---
+# Safely handle URL parameters using modern 2026 syntax
+query_params = st.query_params
+if "msg" in query_params:
+    user_prompt = query_params["msg"]
+    
+    # Immediately clear query string parameters to prevent infinite refresh processing loops
+    st.query_params.clear()
+    
+    # Save text turn data to log states
+    st.session_state.conversation.append({"role": "user", "text": user_prompt})
+    
+    with st.spinner("Thinking..."):
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash", 
+                contents=f"{sys_msg} User: {user_prompt}"
+            )
+            full_response = response.text
+            
+            # Use gTTS to compile vocal response natively
+            tts = gTTS(text=full_response, lang='en', slow=False)
+            audio_fp = io.BytesIO()
+            tts.write_to_fp(audio_fp)
+            ai_audio_bytes = audio_fp.getvalue()
+            
+            # Save assistant text reply turn data
+            st.session_state.conversation.append({"role": "Assistant", "text": full_response})
+            
+            # Inject raw HTML5 Autoplay directly into the viewport
+            b64 = base64.b64encode(ai_audio_bytes).decode()
+            autoplay_html = f'<audio autoplay="true" src="data:audio/mp3;base64,{b64}"></audio>'
+            st.markdown(autoplay_html, unsafe_allow_html=True)
+            
+            st.rerun()
+            
+        except Exception as e:
+            st.error(f"Voice Assistant Engine Error: {e}")
 
 # --- DISPLAY CONVERSATION STREAM ---
 for turn in st.session_state.conversation:
