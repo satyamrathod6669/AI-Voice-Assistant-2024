@@ -451,54 +451,11 @@ if transcript and isinstance(transcript, str) and transcript.strip():
 
         st.rerun()
 
-# ── SIDEBAR ────────────────────────────────────────────────────────────────────
-with st.sidebar:
-    st.markdown("### 📋 Session Log")
-    if st.session_state.conversation:
-        for t in st.session_state.conversation:
-            icon = "🧑" if t["role"] == "user" else "🤖"
-            st.markdown(f"**{icon} {t['role'].title()}:** {t['text']}")
-    else:
-        st.caption("No conversation yet. Click the orb and speak!")
-    # ── Export chat ───────────────────────────────────────────────────────────
-    if st.session_state.conversation:
-        def build_export():
-            lines = [
-                "=" * 50,
-                "  SATYAM'S AI ASSISTANT — CHAT EXPORT",
-                f"  Date : {datetime.now().strftime('%d %B %Y')}",
-                f"  Time : {datetime.now().strftime('%I:%M %p')}",
-                "=" * 50, ""
-            ]
-            for t in st.session_state.conversation:
-                role  = "You" if t["role"] == "user" else "Assistant"
-                ts    = t.get("time", "--:--:--")
-                lines.append(f"[{ts}] {role}:")
-                lines.append(f"  {t['text']}")
-                lines.append("")
-            lines += ["=" * 50, "End of conversation", "=" * 50]
-            return "\n".join(lines)
-
-        filename = f"chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-        st.download_button(
-            label="💾 Save Chat as .txt",
-            data=build_export(),
-            file_name=filename,
-            mime="text/plain",
-            use_container_width=True
-        )
-
-    if st.button("🗑️ Clear History", use_container_width=True):
-        st.session_state.conversation   = []
-        st.session_state.last_processed = None
-        st.rerun()
-
-    # ── View all past logs ─────────────────────────────────────────────────────
-    st.markdown("---")
-    st.markdown("### 🗂️ All Past Chats")
+# ── PAST CHAT LOGS (main page, always visible) ────────────────────────────────
+st.markdown("---")
+with st.expander("🗂️ View All Past Chats", expanded=False):
     all_logs = load_all_chats()
     if all_logs:
-        # Group by session
         sessions = {}
         for msg in all_logs:
             sid = msg.get("session", "unknown")
@@ -506,18 +463,18 @@ with st.sidebar:
 
         for sid, msgs in sorted(sessions.items(), reverse=True):
             date = msgs[0].get("date", "")
-            with st.expander(f"📅 {date}  |  Session: {sid}", expanded=False):
-                for m in msgs:
-                    icon = "🧑" if m["role"] == "User" else "🤖"
-                    st.markdown(f"**{icon} [{m['time']}] {m['role']}:** {m['text']}")
+            st.markdown(f"**📅 {date} — Session `{sid}`**")
+            for m in msgs:
+                icon = "🧑" if m["role"] == "User" else "🤖"
+                st.markdown(f"{icon} **[{m['time']}] {m['role']}:** {m['text']}")
+            st.markdown("---")
 
-        # Download all logs as JSON
         st.download_button(
-            label="⬇️ Download All Logs",
+            label="⬇️ Download All Logs as JSON",
             data=json.dumps(all_logs, indent=2),
             file_name=f"all_chats_{datetime.now().strftime('%Y%m%d')}.json",
             mime="application/json",
             use_container_width=True
         )
     else:
-        st.caption("No past logs yet.")
+        st.info("💬 No past chats saved yet. Start speaking to log chats!")
