@@ -1,7 +1,8 @@
 import streamlit as st
 import streamlit.components.v1 as components
 from google import genai
-from gtts import gTTS
+import edge_tts
+import asyncio
 import io, base64, os, tempfile, pathlib
 
 # ── PAGE CONFIG ────────────────────────────────────────────────────────────────
@@ -182,10 +183,17 @@ if transcript and isinstance(transcript, str) and transcript.strip():
                     contents=history
                 )
                 reply = resp.text
-                tts = gTTS(text=reply, lang="en", slow=False)
-                buf = io.BytesIO()
-                tts.write_to_fp(buf)
-                b64 = base64.b64encode(buf.getvalue()).decode()
+                # edge-tts: natural Indian English female voice
+                async def synth(text):
+                    communicate = edge_tts.Communicate(text, voice="en-IN-NeerjaNeural", rate="+5%")
+                    buf = io.BytesIO()
+                    async for chunk in communicate.stream():
+                        if chunk["type"] == "audio":
+                            buf.write(chunk["data"])
+                    return buf.getvalue()
+
+                audio_bytes = asyncio.run(synth(reply))
+                b64 = base64.b64encode(audio_bytes).decode()
                 st.session_state.conversation.append({"role": "assistant", "text": reply})
                 st.session_state.pending_audio = b64
             except Exception as e:
