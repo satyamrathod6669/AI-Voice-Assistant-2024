@@ -133,13 +133,29 @@ except Exception:
 
 client = genai.Client(api_key=API_KEY)
 
-MODEL = "models/gemini-2.0-flash"
+MODEL = "models/gemini-2.5-flash"
 
 SYS = (
     "You are a professional AI assistant built by Satyam, an AI Engineer. "
     "Reply very briefly in 1 or 2 conversational sentences max. "
     "Be helpful, friendly, and concise."
 )
+
+# ── GENERATE WITH AUTO-RETRY on 429 ───────────────────────────────────────────
+import time
+
+def generate_with_retry(prompt: str, retries: int = 3, wait: int = 10) -> str:
+    for attempt in range(retries):
+        try:
+            resp = client.models.generate_content(model=MODEL, contents=prompt)
+            return resp.text.strip()
+        except Exception as e:
+            err = str(e)
+            if "429" in err and attempt < retries - 1:
+                st.toast(f"Rate limited — retrying in {wait}s… ({attempt+1}/{retries})")
+                time.sleep(wait)
+            else:
+                raise
 
 # ── TTS ────────────────────────────────────────────────────────────────────────
 def tts_edge(text: str):
@@ -311,11 +327,7 @@ if transcript and isinstance(transcript, str) and transcript.strip():
                     full_prompt += f"{role}: {turn['text']}\n"
                 full_prompt += f"User: {user_text}\nAssistant:"
 
-                resp = client.models.generate_content(
-                    model=MODEL,
-                    contents=full_prompt
-                )
-                reply = resp.text.strip()
+                reply = generate_with_retry(full_prompt)
 
                 st.session_state.conversation.append({"role": "assistant", "text": reply})
                 st.session_state.pending_audio = speak(reply)
