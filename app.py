@@ -8,6 +8,7 @@ import base64
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Satyam's AI Assistant", page_icon="🤖", layout="centered")
 
+# Dark, ultra-modern tech theme styling
 st.markdown("""
     <style>
     .stApp { background-color: #0F172A; color: #F8FAFC; }
@@ -24,8 +25,6 @@ if "conversation" not in st.session_state:
     st.session_state.conversation = []
 if "listening" not in st.session_state:
     st.session_state.listening = True
-if "voice_prompt" not in st.session_state:
-    st.session_state.voice_prompt = None
 
 # --- UI HEADER ---
 st.markdown('<div class="assistant-card"><h2>🤖 Satyam\'s Voice Assistant</h2>', unsafe_allow_html=True)
@@ -34,6 +33,7 @@ if st.session_state.listening:
     st.markdown('<p>Status: <span class="status-listening">● Microphone Streaming Live...</span></p>', unsafe_allow_html=True)
     if st.button("🛑 Stop Listening", use_container_width=True):
         st.session_state.listening = False
+        st.st.query_params.clear()
         st.rerun()
 else:
     st.markdown('<p>Status: <span class="status-stopped">■ Assistant Paused</span></p>', unsafe_allow_html=True)
@@ -43,7 +43,7 @@ else:
 
 st.markdown('</div>', unsafe_allow_html=True)
 
-# --- SECURE API KEY ---
+# --- SECURE API KEY SETUP ---
 try:
     API_KEY = st.secrets["GEMINI_API_KEY"]
 except:
@@ -52,65 +52,19 @@ except:
 client = genai.Client(api_key=API_KEY)
 sys_msg = "You are a professional AI assistant built by Satyam, an AI Engineer. Reply very briefly in 1 or 2 conversational sentences max."
 
+# --- LIVE TRANSCRIPT DOM DISPLAY PLACEHOLDER ---
 st.markdown('<div id="transcript-container" class="live-transcript-box">🎙️ Say something... (Your live speech will appear here)</div>', unsafe_allow_html=True)
 
-# --- AMBIENT JAVASCRIPT & PYTHON BRIDGE COMPONENT ---
-if st.session_state.listening:
-    # We use Streamlit's official HTML component callback trick to securely pipe data back
-    html_bridge = """
-    <div id="transcript-container-inner" style="display:none;"></div>
-    <script>
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (SpeechRecognition) {
-            const recognition = new SpeechRecognition();
-            recognition.continuous = false;
-            recognition.interimResults = true;
-            recognition.lang = 'en-US';
-            
-            recognition.onresult = (event) => {
-                let interimTranscript = '';
-                let finalTranscript = '';
-                for (let i = event.resultIndex; i < event.results.length; ++i) {
-                    if (event.results[i].isFinal) {
-                        finalTranscript += event.results[i][0].transcript;
-                    } else {
-                        interimTranscript += event.results[i][0].transcript;
-                    }
-                }
-                
-                // Dynamically modify parent layout container text safely
-                const parentDoc = window.parent.document;
-                const targetBox = parentDoc.getElementById("transcript-container");
-                if (targetBox) {
-                    targetBox.innerHTML = "<b>Listening:</b> " + (finalTranscript || interimTranscript);
-                }
-                
-                // Securely notify Python backend via Streamlit's query bridge channel
-                if (finalTranscript.trim().length > 0) {
-                    window.parent.postMessage({
-                        type: 'streamlit:setComponentValue',
-                        value: finalTranscript.trim()
-                    }, '*');
-                }
-            };
-            
-            recognition.onend = () => { recognition.start(); };
-            recognition.start();
-        }
-    </script>
-    """
-    # This captures the `value` sent by postMessage instantly into Python!
-    captured_speech = st.components.v1.html(html_bridge, height=0, width=0)
+# --- BACKEND PIPELINE EXECUTION ---
+# Safely handle incoming prompts from query strings without throwing DeltaGenerator exceptions
+query_params = st.query_params
+if "prompt_input" in query_params:
+    user_prompt = query_params["prompt_input"]
     
-    if captured_speech and captured_speech != st.session_state.get("last_processed_speech"):
-        st.session_state.voice_prompt = captured_speech
-        st.session_state["last_processed_speech"] = captured_speech
-
-# --- BACKEND CORE ENGINE EXECUTOR ---
-if st.session_state.voice_prompt:
-    user_prompt = st.session_state.voice_prompt
-    st.session_state.voice_prompt = None  # Flush buffer immediately
+    # Instantly clear query params to drop the loop and preserve your API quota limits
+    st.query_params.clear()
     
+    # Append the phrase string to conversation array
     st.session_state.conversation.append({"role": "user", "text": user_prompt})
     
     with st.spinner("Thinking..."):
@@ -121,6 +75,7 @@ if st.session_state.voice_prompt:
             )
             full_response = response.text
             
+            # Use gTTS to compile vocal response natively
             tts = gTTS(text=full_response, lang='en', slow=False)
             audio_fp = io.BytesIO()
             tts.write_to_fp(audio_fp)
@@ -128,7 +83,7 @@ if st.session_state.voice_prompt:
             
             st.session_state.conversation.append({"role": "Assistant", "text": full_response})
             
-            # Autoplay delivery pipeline injection
+            # Inject raw HTML5 Autoplay directly into the viewport
             b64 = base64.b64encode(ai_audio_bytes).decode()
             autoplay_html = f'<audio autoplay="true" src="data:audio/mp3;base64,{b64}"></audio>'
             st.markdown(autoplay_html, unsafe_allow_html=True)
@@ -137,6 +92,60 @@ if st.session_state.voice_prompt:
             
         except Exception as e:
             st.error(f"Voice Assistant Engine Error: {e}")
+
+# --- INJECT REAL-TIME SPEECH RECOGNITION (Web Speech API via Top Frame Routing) ---
+if st.session_state.listening:
+    speech_js = """
+    <script>
+        const parentDoc = window.parent.document;
+        const displayBox = parentDoc.getElementById("transcript-container");
+        
+        if (!window.recognitionInitialized) {
+            window.recognitionInitialized = true;
+            
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (SpeechRecognition) {
+                const recognition = new SpeechRecognition();
+                recognition.continuous = false; // Ends processing automatically at sentence completion pause
+                recognition.interimResults = true;
+                recognition.lang = 'en-US';
+                
+                window.activeRecognition = recognition;
+                
+                recognition.onresult = (event) => {
+                    let interimTranscript = '';
+                    let finalTranscript = '';
+                    
+                    for (let i = event.resultIndex; i < event.results.length; ++i) {
+                        if (event.results[i].isFinal) {
+                            finalTranscript += event.results[i][0].transcript;
+                        } else {
+                            interimTranscript += event.results[i][0].transcript;
+                        }
+                    }
+                    
+                    if (displayBox) {
+                        displayBox.innerHTML = "<b>Listening:</b> " + (finalTranscript || interimTranscript);
+                    }
+                    
+                    // Safely update the parent layout target URL using web search queries
+                    if (finalTranscript.trim().length > 0) {
+                        console.log("Speech text finalized. Updating Streamlit context...");
+                        window.parent.location.search = "?prompt_input=" + encodeURIComponent(finalTranscript.trim());
+                    }
+                };
+                
+                recognition.onerror = (err) => console.error("Speech Error: ", err);
+                recognition.onend = () => {
+                    if (window.recognitionInitialized) recognition.start();
+                };
+                
+                recognition.start();
+            }
+        }
+    </script>
+    """
+    st.components.v1.html(speech_js, height=0, width=0)
 
 # --- DISPLAY CONVERSATION STREAM ---
 for turn in st.session_state.conversation:
