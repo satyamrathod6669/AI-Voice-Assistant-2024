@@ -2,7 +2,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 from google import genai
 from gtts import gTTS
-import io, base64, pathlib, subprocess, sys
+import io, base64, pathlib, subprocess, sys, os
 
 # ── PAGE CONFIG ────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Satyam's AI Assistant", page_icon="🤖", layout="centered")
@@ -10,41 +10,113 @@ st.set_page_config(page_title="Satyam's AI Assistant", page_icon="🤖", layout=
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@700;800&display=swap');
-:root { --bg:#080C14; --surface:#0F172A; --border:#1E293B; --accent:#38BDF8; --green:#34D399; --muted:#64748B; --text:#E2E8F0; }
+:root {
+    --bg:#080C14;
+    --surface:#0F172A;
+    --border:#1E293B;
+    --accent:#38BDF8;
+    --green:#34D399;
+    --muted:#64748B;
+    --text:#E2E8F0;
+    --user-bubble:#1e3a5f;
+    --ai-bubble:#131f35;
+}
 html,body,.stApp { background:var(--bg) !important; color:var(--text); font-family:'Syne',sans-serif; }
 #MainMenu,footer,header { visibility:hidden; }
 .block-container { padding-top:1.5rem !important; }
 
-.va-card { background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:20px 32px; margin-bottom:16px; text-align:center; }
-.va-card h2 { font-size:1.6rem; font-weight:800; letter-spacing:-0.5px; margin:0 0 4px; }
-.va-card p  { color:var(--muted); font-size:0.88rem; margin:0; }
+.va-card {
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:16px;
+    padding:18px 32px;
+    margin-bottom:14px;
+    text-align:center;
+}
+.va-card h2 { font-size:1.5rem; font-weight:800; letter-spacing:-0.5px; margin:0 0 4px; }
+.va-card p  { color:var(--muted); font-size:0.85rem; margin:0; }
 
-/* Scrollable chat area */
+/* ── Chat container ── */
 .chat-container {
-    max-height: 420px;
-    overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    padding: 16px;
+    gap: 16px;
+    padding: 20px 16px;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 16px;
-    margin-top: 16px;
+    margin-top: 14px;
+    max-height: 450px;
+    overflow-y: auto;
     scroll-behavior: smooth;
 }
 .chat-container::-webkit-scrollbar { width: 4px; }
 .chat-container::-webkit-scrollbar-track { background: transparent; }
 .chat-container::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 
-.chat-empty { color: var(--muted); font-size: 0.82rem; text-align: center; padding: 24px 0; font-family: 'Space Mono', monospace; }
+/* ── Message rows ── */
+.msg-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 10px;
+}
+.msg-row.user  { flex-direction: row-reverse; }   /* user → right */
+.msg-row.ai    { flex-direction: row; }            /* ai   → left  */
 
-.bubble-wrap-user { display:flex; flex-direction:column; align-items:flex-end; }
-.bubble-wrap-ai   { display:flex; flex-direction:column; align-items:flex-start; }
+/* ── Avatar ── */
+.avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    flex-shrink: 0;
+}
+.avatar.ai-av   { background: #0c2040; border: 1px solid var(--accent); }
+.avatar.user-av { background: #1e3a5f; border: 1px solid var(--green); }
 
-.bubble-user  { background:#1e3a5f; border-radius:12px 12px 4px 12px; padding:10px 16px; max-width:78%; font-size:0.88rem; line-height:1.5; }
-.bubble-ai    { background:#0F172A; border:1px solid var(--border); border-radius:12px 12px 12px 4px; padding:10px 16px; max-width:78%; font-size:0.88rem; line-height:1.5; }
-.bubble-label { font-size:0.65rem; color:var(--muted); font-family:'Space Mono',monospace; margin-bottom:3px; }
+/* ── Bubble ── */
+.bubble {
+    max-width: 72%;
+    padding: 10px 15px;
+    font-size: 0.875rem;
+    line-height: 1.6;
+    word-break: break-word;
+}
+.bubble.ai-bubble {
+    background: var(--ai-bubble);
+    border: 1px solid var(--border);
+    border-radius: 4px 16px 16px 16px;   /* sharp top-left like Gemini */
+    color: var(--text);
+}
+.bubble.user-bubble {
+    background: var(--user-bubble);
+    border: 1px solid #2a5080;
+    border-radius: 16px 4px 16px 16px;   /* sharp top-right */
+    color: var(--text);
+}
+
+/* ── Name label above bubble ── */
+.msg-col { display:flex; flex-direction:column; gap:3px; }
+.msg-col.right { align-items: flex-end; }
+.msg-col.left  { align-items: flex-start; }
+.name-tag {
+    font-size: 0.62rem;
+    font-family: 'Space Mono', monospace;
+    color: var(--muted);
+    padding: 0 4px;
+}
+
+/* ── Empty state ── */
+.chat-empty {
+    color: var(--muted);
+    font-size: 0.82rem;
+    text-align: center;
+    padding: 32px 0;
+    font-family: 'Space Mono', monospace;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -61,6 +133,9 @@ except Exception:
 
 client = genai.Client(api_key=API_KEY)
 
+# ✅ Using gemini-1.5-flash — much higher free quota than gemini-2.5-flash
+MODEL = "gemini-1.5-flash"
+
 SYS = (
     "You are a professional AI assistant built by Satyam, an AI Engineer. "
     "Reply very briefly in 1 or 2 conversational sentences max. "
@@ -70,7 +145,7 @@ SYS = (
 # ── TTS ────────────────────────────────────────────────────────────────────────
 def tts_edge(text: str):
     try:
-        import tempfile, os
+        import tempfile
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
             tmp = f.name
         result = subprocess.run(
@@ -169,9 +244,13 @@ _comp_dir.mkdir(exist_ok=True)
 voice_orb = components.declare_component("voice_orb", path=str(_comp_dir))
 
 # ── HEADER ─────────────────────────────────────────────────────────────────────
-st.markdown('<div class="va-card"><h2>🤖 Satyam\'s AI Assistant</h2><p>Click the orb → speak → get an instant AI reply</p></div>', unsafe_allow_html=True)
+st.markdown(
+    '<div class="va-card"><h2>🤖 Satyam\'s AI Assistant</h2>'
+    '<p>Click the orb → speak → get an instant AI reply</p></div>',
+    unsafe_allow_html=True
+)
 
-# ── VOICE ORB (always at top) ──────────────────────────────────────────────────
+# ── VOICE ORB ─────────────────────────────────────────────────────────────────
 transcript = voice_orb(key="voice_orb_main", default=None)
 
 # ── AUTOPLAY AUDIO ─────────────────────────────────────────────────────────────
@@ -182,31 +261,40 @@ if st.session_state.pending_audio:
     )
     st.session_state.pending_audio = None
 
-# ── CHAT HISTORY (below orb, scrollable) ──────────────────────────────────────
-if st.session_state.conversation:
-    bubbles_html = '<div class="chat-container" id="chat-box">'
-    for turn in st.session_state.conversation:
+# ── CHAT HISTORY (Gemini-style: AI left, User right) ──────────────────────────
+def render_chat(conversation):
+    if not conversation:
+        return (
+            '<div class="chat-container">'
+            '<div class="chat-empty">💬 No messages yet — click the orb and speak!</div>'
+            '</div>'
+        )
+
+    html = '<div class="chat-container" id="chat-box">'
+    for turn in conversation:
         if turn["role"] == "user":
-            bubbles_html += f'''
-                <div class="bubble-wrap-user">
-                    <div class="bubble-label">YOU</div>
-                    <div class="bubble-user">{turn["text"]}</div>
-                </div>'''
+            html += f"""
+            <div class="msg-row user">
+                <div class="avatar user-av">🧑</div>
+                <div class="msg-col right">
+                    <span class="name-tag">YOU</span>
+                    <div class="bubble user-bubble">{turn["text"]}</div>
+                </div>
+            </div>"""
         else:
-            bubbles_html += f'''
-                <div class="bubble-wrap-ai">
-                    <div class="bubble-label">ASSISTANT</div>
-                    <div class="bubble-ai">{turn["text"]}</div>
-                </div>'''
-    bubbles_html += '</div>'
-    # Auto-scroll to bottom
-    bubbles_html += "<script>var c=document.getElementById('chat-box');if(c)c.scrollTop=c.scrollHeight;</script>"
-    st.markdown(bubbles_html, unsafe_allow_html=True)
-else:
-    st.markdown(
-        '<div class="chat-container"><div class="chat-empty">💬 No messages yet — click the orb and speak!</div></div>',
-        unsafe_allow_html=True
-    )
+            html += f"""
+            <div class="msg-row ai">
+                <div class="avatar ai-av">🤖</div>
+                <div class="msg-col left">
+                    <span class="name-tag">SATYAM'S ASSISTANT</span>
+                    <div class="bubble ai-bubble">{turn["text"]}</div>
+                </div>
+            </div>"""
+    html += '</div>'
+    html += "<script>var c=document.getElementById('chat-box');if(c)c.scrollTop=c.scrollHeight;</script>"
+    return html
+
+st.markdown(render_chat(st.session_state.conversation), unsafe_allow_html=True)
 
 # ── PROCESS TRANSCRIPT ─────────────────────────────────────────────────────────
 if transcript and isinstance(transcript, str) and transcript.strip():
@@ -225,7 +313,7 @@ if transcript and isinstance(transcript, str) and transcript.strip():
                 full_prompt += f"User: {user_text}\nAssistant:"
 
                 resp = client.models.generate_content(
-                    model="gemini-2.5-flash",
+                    model=MODEL,
                     contents=full_prompt
                 )
                 reply = resp.text.strip()
