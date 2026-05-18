@@ -133,17 +133,7 @@ except Exception:
 
 client = genai.Client(api_key=API_KEY)
 
-# ── DEBUG: show available models (remove after fixing) ─────────────────────────
-with st.expander("🔧 Available Models (debug)", expanded=False):
-    try:
-        models = client.models.list()
-        for m in models:
-            st.code(m.name)
-    except Exception as e:
-        st.error(f"Could not list models: {e}")
-
-# ✅ Using gemini-1.5-flash — much higher free quota than gemini-2.5-flash
-MODEL = "gemini-1.5-flash-002"
+MODEL = "models/gemini-2.0-flash"
 
 SYS = (
     "You are a professional AI assistant built by Satyam, an AI Engineer. "
