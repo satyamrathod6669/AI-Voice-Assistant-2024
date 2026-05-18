@@ -184,6 +184,7 @@ if transcript and isinstance(transcript, str) and transcript.strip():
                 )
                 reply = resp.text
                 # edge-tts: natural Indian English female voice
+                import tempfile, os
                 async def synth(text):
                     communicate = edge_tts.Communicate(text, voice="en-IN-NeerjaNeural", rate="+5%")
                     buf = io.BytesIO()
@@ -192,7 +193,13 @@ if transcript and isinstance(transcript, str) and transcript.strip():
                             buf.write(chunk["data"])
                     return buf.getvalue()
 
-                audio_bytes = asyncio.run(synth(reply))
+                # Use a fresh event loop to avoid conflict with Streamlit's loop
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    audio_bytes = loop.run_until_complete(synth(reply))
+                finally:
+                    loop.close()
                 b64 = base64.b64encode(audio_bytes).decode()
                 st.session_state.conversation.append({"role": "assistant", "text": reply})
                 st.session_state.pending_audio = b64
